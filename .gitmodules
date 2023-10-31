@@ -1,0 +1,36 @@
+[submodule "parlaylib"]
+	path = external/parlaylib
+  url = https://github.com/ParAlg/parlaylib
+  branch = bazel_v2
+[submodule "PAM"]
+	path = external/PAM
+	url = https://github.com/ldhulipala/PAM
+[submodule "external/abseil-cpp"]
+	path = external/abseil-cpp
+	url = https://github.com/abseil/abseil-cpp.git
+[submodule "external/ParallelTools"]
+	path = external/ParallelTools
+	url = https://github.com/wheatman/ParallelTools.git
+[submodule "external/StructOfArrays"]
+	path = external/StructOfArrays
+	url = https://github.com/wheatman/StructOfArrays.git
+[submodule "external/SSTGraph"]
+	path = external/SSTGraph
+	url = https://github.com/wheatman/SSTGraph.git
+[submodule "external/dhb"]
+	path = external/dhb
+	url = https://github.com/wheatman/dhb.git
+[submodule "external/terrace"]
+	path = external/terrace
+	url = https://github.com/itshelenxu/terrace.git
+  branch = for_gbbs
+[submodule "external/aspen"]
+	path = external/aspen
+	url = git@github.com:DapperX/aspen.git
+	branch = gbbs-plus
+[submodule "external/Packed-Memory-Array"]
+	path = external/Packed-Memory-Array
+	url = git@github.com:wheatman/Packed-Memory-Array.git
+[submodule "external/CPAM"]
+	path = external/CPAM
+	url = git@github.com:ParAlg/CPAM.git
