@@ -1,96 +1,32 @@
-# GBBS: Graph Based Benchmark Suite  ![Bazel build](https://github.com/paralg/gbbs/workflows/CI/badge.svg)
+# BYO: A Unified Framework for Benchmarking Large-Scale Graph Containers
 
 Organization
 --------
 
-This repository contains code for our SPAA paper "Theoretically Efficient
-Parallel Graph Algorithms Can Be Fast and Scalable" (SPAA'18). It includes
-implementations of the following parallel graph algorithms:
+This repository contains code for our VLDB paper "BYO: A Unified Framework for Benchmarking Large-Scale Graph Containers" (SPAA'18).
+st Search)
 
-**Clustering Problems**
-* SCAN Graph Clustering
-* Graph-Based Hierarchical Agglomerative Clustering (Graph HAC)
+It is designed to make it as easy as possible to implement and benchmark new graph container data structures.
 
-**Connectivity Problems**
-* Low-Diameter Decomposition
-* Connectivity
-* Spanning Forest
-* Biconnectivity
-* Minimum Spanning Tree
-* Strongly Connected Components
+The containers already implemented can be found in benchmarks/run_structures
 
-**Covering Problems**
-* Coloring
-* Maximal Matching
-* Maximal Independent Set
-* Approximate Set Cover
+The raw data for all systems we tested can be found at [here](https://docs.google.com/spreadsheets/d/1Vi3bbCeWBCgl-Me15aAYCf0wPGSVTteuVJFeKkLjcW8/edit?usp=sharing)
 
-**Eigenvector Problems**
-* PageRank
-
-**Substructure Problems**
-* Triangle Counting
-* Approximate Densest Subgraph
-* k-Core (Coreness)
-* Degeneracy Ordering (Low-Outdegree Orientation)
-* k-Clique Counting
-* 5-Cycle Counting
-* k-Truss
-
-**Shortest Path Problems**
-* Unweighted SSSP (Breadth-First Search)
-* General Weight SSSP (Bellman-Ford)
-* Integer Weight SSSP (Weighted Breadth-First Search)
-* Single-Source Betweenness Centrality
-* Single-Source Widest Path
-* k-Spanner
-
-The code for these applications is located in the `benchmark` directory. The
-implementations are based on the Ligra/Ligra+/Julienne graph processing
-frameworks. The framework code is located in the `src` directory.
-
-The codes used here are still in development, and we plan to add more
-applications/benchmarks. We currently include the following extra codes,
-which are part of ongoing work.
-
-* experimental/KTruss
-
-If you use our work, please cite our [paper](https://arxiv.org/abs/1805.05208):
-
-```
-@inproceedings{dhulipala2018theoretically,
-  author    = {Laxman Dhulipala and
-               Guy E. Blelloch and
-               Julian Shun},
-  title     = {Theoretically Efficient Parallel Graph Algorithms Can Be Fast and
-               Scalable},
-  booktitle = {ACM Symposium on Parallelism in Algorithms and Architectures (SPAA)},
-  year      = {2018},
-}
-```
 
 Compilation
 --------
 
 Compiler:
-* g++ &gt;= 7.4.0 with support for Cilk Plus
-* g++ &gt;= 7.4.0 with pthread support (Homemade Scheduler)
+* g++ &gt;= 11 with pthread support (Homemade Scheduler)
+* clang++ &gt;= 14 with support for OpenCilk
 
 Build system:
 * [Bazel](https://docs.bazel.build/versions/master/install.html) 2.1.0
-* Make --- though our primary build system is Bazel, we also maintain Makefiles
-  for those who wish to run benchmarks without installing Bazel.
+
 
 The default compilation uses a lightweight scheduler developed at CMU (Homemade)
-for parallelism, which results in comparable performance to Cilk Plus. The
-half-lengths for certain functions such as histogramming are lower using
-Homemade, which results in better performance for codes like KCore.
+for parallelism.
 
-The benchmark supports both uncompressed and compressed graphs. The uncompressed
-format is identical to the uncompressed format in Ligra. The compressed format,
-called bytepd_amortized (bytepda) is similar to the parallelByte format used in
-Ligra+, with some additional functionality to support efficiently packs,
-filters, and other operations over neighbor lists.
 
 To compile codes for graphs with more than 2^32 edges, the `LONG` command-line
 parameter should be set. If the graph has more than 2^32 vertices, the
@@ -98,39 +34,44 @@ parameter should be set. If the graph has more than 2^32 vertices, the
 been tested with more than 2^32 vertices, so if any issues arise please contact
 [Laxman Dhulipala](mailto:ldhulipa@cs.cmu.edu).
 
-To compile with the Cilk Plus scheduler instead of the Homegrown scheduler, use
+To compile with the OpenCilk scheduler instead of the Homegrown scheduler, use
 the Bazel configuration `--config=cilk`. To compile using OpenMP instead, use
 the Bazel configuration `--config=openmp`. To compile serially instead, use the
-Bazel configuration `--config=serial`. (For the Makefiles, instead set the
-environment variables `CILK`, `OPENMP`, or `SERIAL` respectively.)
+Bazel configuration `--config=serial`. 
 
 To build:
 ```sh
 # Load external libraries as submodules. (This only needs to be run once.)
 git submodule update --init
 
-# For Bazel:
-$ bazel build  //...  # compiles all benchmarks
-
-# For Make:
-# First set the appropriate environment variables, e.g., first run
-# `export CILK=1` to compile with Cilk Plus.
-# After that, build using `make`.
-$ cd benchmarks/BFS/NonDeterministicBFS  # go to a benchmark
-$ make
-```
 Note that the default compilation mode in bazel is to build optimized binaries
 (stripped of debug symbols). You can compile debug binaries by supplying `-c
 dbg` to the bazel build command.
+
+#To build all of the different structures use the command 
+`bazel build benchmarks/run_structures:all`
+
+#similarly individual systems can be built with 
+
+`bazel build benchmarks/run_structures:run_csr
 
 The following commands cleans the directory:
 ```sh
 # For Bazel:
 $ bazel clean  # removes all executables
 
-# For Make:
-$ make clean  # removes executables for the current directory
 ```
+
+
+Adding a new graph Container
+-------
+To add a new set container we recommend following the example given in run_vector.
+
+Similarly to add a new Graph container we recommend following the example in run_single_pma.
+
+You will also need to add the new container to the build file so that it can be built.
+
+
 
 Running code
 -------
@@ -143,9 +84,6 @@ called with the "-s" flag for better performance. For example:
 $ bazel run //benchmarks/BFS/NonDeterministicBFS:BFS_main -- -s -src 10 ~/gbbs/inputs/rMatGraph_J_5_100
 $ bazel run //benchmarks/IntegralWeightSSSP/JulienneDBS17:wBFS_main -- -s -w -src 15 ~/gbbs/inputs/rMatGraph_WJ_5_100
 
-# For Make:
-$ ./BFS -s -src 10 ../../../inputs/rMatGraph_J_5_100
-$ ./wBFS -s -w -src 15 ../../../inputs/rMatGraph_WJ_5_100
 ```
 
 Note that the codes that compute single-source shortest paths (or centrality)
@@ -162,6 +100,7 @@ $ numactl -i all bazel run [...]
 
 Running code on compressed graphs
 -----------
+The CSR graphs can also take in a compressed graph.  The dynamic systems take in an uncompressed graph and compress it on the fly
 
 We make use of the bytePDA format in our benchmark, which is similar to the
 parallelByte format of Ligra+, extended with additional functionality. We have
@@ -173,9 +112,6 @@ outputs a bytePDA graph. The converter can be used as follows:
 bazel run //utils:compressor -- -s -o ~/gbbs/inputs/rMatGraph_J_5_100.bytepda ~/gbbs/inputs/rMatGraph_J_5_100
 bazel run //utils:compressor -- -s -w -o ~/gbbs/inputs/rMatGraph_WJ_5_100.bytepda ~/gbbs/inputs/rMatGraph_WJ_5_100
 
-# For Make:
-./compressor -s -o ../inputs/rMatGraph_J_5_100.bytepda ../inputs/rMatGraph_J_5_100
-./compressor -s -w -o ../inputs/rMatGraph_WJ_5_100.bytepda ../inputs/rMatGraph_WJ_5_100
 ```
 
 After an uncompressed graph has been converted to the bytepda format,
@@ -186,9 +122,6 @@ an additional `-c` flag.
 # For Bazel:
 $ bazel run //benchmarks/BFS/NonDeterministicBFS:BFS_main -- -s -c -src 10 ~/gbbs/inputs/rMatGraph_J_5_100.bytepda
 
-# For Make:
-$ ./BFS -s -c -src 10 ../../../inputs/rMatGraph_J_5_100.bytepda
-$ ./wBFS -s -w -c -src 15 ../../../inputs/rMatGraph_WJ_5_100.bytepda
 ```
 
 When processing large compressed graphs, using the `-m` command-line flag can
@@ -212,8 +145,6 @@ used as follows:
 # For Bazel:
 bazel run //utils:compressor -- -s -o ~/gbbs/inputs/rMatGraph_J_5_100.binary ~/gbbs/inputs/rMatGraph_J_5_100
 
-# For Make:
-./compressor -s -o ../inputs/rMatGraph_J_5_100.binary ../inputs/rMatGraph_J_5_100
 ```
 
 After an uncompressed graph has been converted to the binary format,
@@ -225,8 +156,6 @@ file using mmap.
 # For Bazel:
 $ bazel run //benchmarks/BFS/NonDeterministicBFS:BFS_main -- -s -b -src 10 ~/gbbs/inputs/rMatGraph_J_5_100.binary
 
-# For Make:
-$ ./BFS -s -b -src 10 ../../../inputs/rMatGraph_J_5_100.binary
 ```
 
 Note that application performance will be affected if the file is not already
