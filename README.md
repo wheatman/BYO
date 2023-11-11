@@ -3,7 +3,7 @@
 Organization
 --------
 
-This repository contains code for our VLDB paper "BYO: A Unified Framework for Benchmarking Large-Scale Graph Containers" (SPAA'18).
+This repository contains code for our VLDB paper "BYO: A Unified Framework for Benchmarking Large-Scale Graph Containers" (VLDB'24 in submission).
 st Search)
 
 It is designed to make it as easy as possible to implement and benchmark new graph container data structures.
