@@ -9,10 +9,19 @@ cc_binary(
 )
 
 cc_binary(
+    name = "run_gbbs",
+    srcs = ["run_gbbs.cc"],
+    deps = ["//benchmarks:run_unweighted",
+    "//gbbs:bridge",
+     ],
+)
+
+cc_binary(
     name = "run_csr_shuffled",
-    srcs = ["run_csr_shuffled.cc"],
+    srcs = ["run_csr.cc"],
     deps = ["//benchmarks:run_unweighted",
      ],
+     defines = ["CSR_SHUFFLE"],
 )
 
 cc_binary(
@@ -96,6 +105,23 @@ cc_binary(
      ],
 )
 cc_binary(
+    name = "run_pcsr",
+    srcs = ["run_pcsr.cc"],
+    deps = ["//benchmarks:run_unweighted",
+    "@cpma//PMA:pcsr",
+    "//gbbs:bridge",
+     ],
+)
+
+cc_binary(
+    name = "run_pcsr_orig",
+    srcs = ["run_pcsr_orig.cc"],
+    deps = ["//benchmarks:run_unweighted",
+    "@pcsr_orig//:pcsr_orig",
+    "//gbbs:bridge",
+     ],
+)
+cc_binary(
     name = "run_dhb",
     srcs = ["run_dhb.cc"],
     deps = ["//benchmarks:run_unweighted",
@@ -112,6 +138,18 @@ cc_binary(
     "@Terrace//terrace:terrace_graph",
     "@ParallelTools//ParallelTools:parallel",
     "//gbbs:bridge",
+     ],
+)
+
+cc_binary(
+    name = "run_ppcsr",
+    srcs = ["run_ppcsr.cc"],
+    deps = ["//benchmarks:run_unweighted",
+    "@Terrace//terrace:PMA",
+    "@ParallelTools//ParallelTools:parallel",
+    "//gbbs:bridge",
+    "@ParallelTools//ParallelTools:sort",
+    "@ParallelTools//ParallelTools:reducer",
      ],
 )
 

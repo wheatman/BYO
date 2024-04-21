@@ -12,23 +12,7 @@
 //     -s : indicate that the graph is symmetric
 //     -d : dump the output arrays to files, useful for debugging
 
-#include <unordered_set>
-
-#include "../run_unweighted.h"
-
-#ifdef USE_INPLACE
-static constexpr bool use_inplace = true;
-#else
-static constexpr bool use_inplace = false;
-#endif
-
-using sym_graph_impl = gbbs::graph_implementations::symmetric_set_graph<
-    std::unordered_set<gbbs::uintE>, gbbs::empty,
-    /* inplace */ use_inplace, /*prefer_sorted_input*/ false>;
-
-using asym_graph_impl = gbbs::graph_implementations::asymmetric_set_graph<
-    std::unordered_set<gbbs::uintE>, gbbs::empty,
-    /* inplace */ use_inplace, /*prefer_sorted_input*/ false>;
+#include "../run_weighted.h"
 
 using graph_api = gbbs::full_api;
 
@@ -42,31 +26,35 @@ int main(int argc, char *argv[]) {
   gbbs::run_all_options options;
   options.dump = P.getOptionValue("-d");
   options.rounds = P.getOptionLongValue("-rounds", 3);
-  options.max_batch =
-      static_cast<size_t>(P.getOptionLongValue("-max_batch", 1000000));
   options.src = static_cast<gbbs::uintE>(P.getOptionLongValue("-src", 0));
-  options.inserts = P.getOptionValue("-i");
 
   std::cout << "### Graph: " << iFile << std::endl;
   if (compressed) {
-    std::cerr << "does not support compression\n";
-    return -1;
-  } else {
     if (symmetric) {
-      using graph_t =
-          gbbs::Graph<sym_graph_impl, /* symmetric */ true, graph_api>;
-      auto G = gbbs::gbbs_io::read_unweighted_symmetric_graph<graph_t>(
-          iFile, mmap, binary);
-      auto bytes_used = G.get_memory_size();
-      std::cout << "total bytes used = " << bytes_used << "\n";
+      auto G = gbbs::gbbs_io::read_compressed_symmetric_graph<int>(iFile, mmap);
       run_all(G, options);
     } else {
-      using graph_t =
-          gbbs::Graph<asym_graph_impl, /* symmetric */ false, graph_api>;
-      auto G = gbbs::gbbs_io::read_unweighted_symmetric_graph<graph_t>(
+      auto G =
+          gbbs::gbbs_io::read_compressed_asymmetric_graph<int>(iFile, mmap);
+      run_all(G, options);
+    }
+  } else {
+    if (symmetric) {
+      using graph_impl =
+          gbbs::graph_implementations::symmetric_graph<gbbs::symmetric_vertex,
+                                                       int>;
+      using graph_t = gbbs::Graph<graph_impl, /* symmetric */ true, graph_api>;
+      auto G = gbbs::gbbs_io::read_weighted_symmetric_graph<graph_t>(
           iFile, mmap, binary);
       run_all(G, options);
-      return -1;
+    } else {
+      using graph_impl =
+          gbbs::graph_implementations::asymmetric_graph<gbbs::asymmetric_vertex,
+                                                        int>;
+      using graph_t = gbbs::Graph<graph_impl, /* symmetric */ false, graph_api>;
+      auto G = gbbs::gbbs_io::read_weighted_asymmetric_graph<graph_t>(
+          iFile, mmap, binary);
+      run_all(G, options);
     }
   }
   return 1;

@@ -12,110 +12,118 @@
 //     -s : indicate that the graph is symmetric
 //     -d : dump the output arrays to files, useful for debugging
 
+#include <cstdint>
 #include <functional>
-#include <span>
 
 #ifdef HOMEGROWN
 #define PARLAY 1
 #endif
 
-#define NO_TLX
-#include "PMA/CPMA.hpp"
-#include "gbbs/bridge.h"
 #include "reducer.hpp"
+#define NO_TLX
+#include "PMA/PCSR.hpp"
+#include "gbbs/bridge.h"
 
-#include "../run_unweighted.h"
-
-namespace {
-template <class F, bool no_early_exit_, class W> struct F2 {
-  F f;
-  F2(F f_) : f(f_) {}
-  W empty_weight = W();
-  auto operator()(auto src, auto dest) { return f(src, dest, empty_weight); }
-  static constexpr bool no_early_exit = no_early_exit_;
-};
-}; // namespace
-
-template <class W> struct PMA_graph {
-  using vertex_weight_type = double;
+template <template <class W> class vertex_type, class W>
+struct symmetric_PCSR_graph {
+  using vertex = vertex_type<W>;
   using weight_type = W;
-  using edge_type = std::tuple<gbbs::uintE, W>;
+  static constexpr bool binary = std::is_same_v<gbbs::empty, W>;
+  static_assert(binary);
+  using vertex_weight_type = double;
+  using edge_type = typename vertex::edge_type;
 
-  size_t N() const { return pma.num_nodes(); }
+  size_t N() const { return nodes.num_nodes(); }
+
+  auto degree(size_t i) const { return nodes.get_degree(i); }
 
   template <class F> void map_neighbors(size_t i, F f) const {
-    pma.map_neighbors(i, F2<F, true, W>(f), extra_data, false);
+    W empty_weight = W();
+    nodes.map_neighbors<-1>(
+        i, [&](auto src, auto dest) { return f(src, dest, empty_weight); },
+        nullptr, false);
   }
 
   template <class F> void parallel_map_neighbors(size_t i, F f) const {
-    pma.map_neighbors(i, F2<F, true, W>(f), extra_data, true);
+    W empty_weight = W();
+    nodes.map_neighbors<-1>(
+        i, [&](auto src, auto dest) { return f(src, dest, empty_weight); },
+        nullptr, true);
   }
 
   template <class F> void map_neighbors_early_exit(size_t i, F f) const {
-    pma.map_neighbors(i, F2<F, false, W>(f), extra_data, false);
+    W empty_weight = W();
+    nodes.map_neighbors<1>(
+        i, [&](auto src, auto dest) { return f(src, dest, empty_weight); },
+        nullptr, false);
   }
 
   template <class F>
   void parallel_map_neighbors_early_exit(size_t i, F f) const {
-    pma.map_neighbors(i, F2<F, false, W>(f), extra_data, true);
-  }
-
-  void insert_sorted_batch(std::tuple<uint32_t, uint32_t> *es, size_t n) {
-    pma.insert_batch(MultiPointer<uint64_t>(std::bit_cast<uint64_t *>(es)), n,
-                     true);
-  }
-
-  void remove_sorted_batch(std::tuple<uint32_t, uint32_t> *es, size_t n) {
-    pma.remove_batch(std::bit_cast<uint64_t *>(es), n, true);
+    W empty_weight = W();
+    nodes.map_neighbors<1>(
+        i, [&](auto src, auto dest) { return f(src, dest, empty_weight); },
+        nullptr, true);
   }
 
   // ======================= Constructors and fields  ========================
-  PMA_graph() : vertex_weights(nullptr) {}
+  symmetric_PCSR_graph() : vertex_weights(nullptr) {}
 
-  PMA_graph(auto *v_data, size_t n, size_t m,
-            std::function<void()> _deletion_fn, edge_type *_e0,
-            vertex_weight_type *_vertex_weights = nullptr)
-      : vertex_weights(_vertex_weights), deletion_fn(_deletion_fn) {
-    Reducer_Vector<uint64_t> vec;
+  // for now use the same constructor as the exsisting one for ease, but
+  // probably write a more general constuctor for everyone to use later
+  // TODO(wheatman) figure out what to do with _deletion_fn, probably should
+  // just use unique pointer
+  symmetric_PCSR_graph(auto *v_data, size_t n, size_t m,
+                       std::function<void()> _deletion_fn, edge_type *_e0,
+                       vertex_weight_type *_vertex_weights = nullptr)
+      : nodes(n), vertex_weights(_vertex_weights), deletion_fn(_deletion_fn) {
+
+    Reducer_Vector<std::tuple<uint32_t, uint32_t>> vec;
     gbbs::parallel_for(0, n, [&](uint64_t i) {
       for (size_t j = v_data[i].offset; j < v_data[i].offset + v_data[i].degree;
            j++) {
-        vec.push_back(i << 32UL | std::get<0>(_e0[j]));
+        vec.push_back({i, std::get<0>(_e0[j])});
       }
     });
     auto seq = vec.get_sequence();
-    pma.insert_batch(seq.data(), seq.size());
-    extra_data = pma.getExtraData(false);
+    nodes.insert_batch(seq);
+  }
+
+  void insert_sorted_batch(auto *es, size_t n) {
+    auto slice = parlay::slice(es, es + n);
+    nodes.insert_batch(slice, true);
+  }
+
+  void remove_sorted_batch(auto *es, size_t n) {
+    auto slice = parlay::slice(es, es + n);
+    nodes.remove_batch(slice, true);
   }
 
   // Move constructor
-  PMA_graph(PMA_graph &&other) noexcept {
-    pma = other.pma;
+  symmetric_PCSR_graph(symmetric_PCSR_graph &&other) noexcept {
+    nodes = other.nodes;
     vertex_weights = other.vertex_weights;
     other.vertex_weights = nullptr;
-    extra_data = other.extra_data;
     deletion_fn = std::move(other.deletion_fn);
   }
 
   // Move assignment
-  PMA_graph &operator=(PMA_graph &&other) noexcept {
-    pma = other.pma;
+  symmetric_PCSR_graph &operator=(symmetric_PCSR_graph &&other) noexcept {
+    nodes = other.nodes;
     vertex_weights = other.vertex_weights;
     other.vertex_weights = nullptr;
-    extra_data = other.extra_data;
     deletion_fn = std::move(other.deletion_fn);
   }
 
   // Copy constructor
-  PMA_graph(const PMA_graph &other) : pma(other.pma) {
+  symmetric_PCSR_graph(const symmetric_PCSR_graph &other) : nodes(other.nodes) {
     vertex_weights = nullptr;
     if (other.vertex_weights != nullptr) {
       vertex_weights = gbbs::new_array_no_init<vertex_weight_type>(N());
-      parallel_for(0, N(), [&](size_t i) {
+      gbbs::parallel_for(0, N(), [&](size_t i) {
         vertex_weights[i] = other.vertex_weights[i];
       });
     }
-    extra_data = pma.getExtraData(false);
     deletion_fn = [&]() {
       if (vertex_weights != nullptr) {
         gbbs::free_array(vertex_weights, N());
@@ -123,24 +131,22 @@ template <class W> struct PMA_graph {
     };
   }
 
-  size_t get_memory_size() {
-    size_t total_size = pma.get_size();
-    total_size += N() * sizeof(*extra_data.first);
-    total_size += N() * sizeof(*extra_data.first);
-    return total_size;
-  }
+  size_t get_memory_size() { return nodes.get_memory_size(); }
 
-  ~PMA_graph() { deletion_fn(); }
+  ~symmetric_PCSR_graph() { deletion_fn(); }
 
   // Graph Data
-  CPMA<PMA_SETTINGS<uint64_t>> pma;
+  using traits = PMA_traits<uncompressed_leaf<uint32_t>, Eytzinger, 0, false,
+                            false, false, 0, true, true>;
+  PCSR<traits> nodes;
   vertex_weight_type *vertex_weights;
-  decltype(pma.getExtraData(false)) extra_data;
   // called to delete the graph
   std::function<void()> deletion_fn;
 };
 
-using graph_impl = PMA_graph<gbbs::empty>;
+#include "../run_unweighted.h"
+
+using graph_impl = symmetric_PCSR_graph<gbbs::symmetric_vertex, gbbs::empty>;
 
 using graph_api = gbbs::full_api;
 
@@ -163,7 +169,7 @@ int main(int argc, char *argv[]) {
 
   std::cout << "### Graph: " << iFile << std::endl;
   if (compressed) {
-    std::cerr << "reads in uncompressed files\n";
+    std::cerr << "is not compressed, and reads in uncompressed files\n";
     return -1;
   } else {
     if (symmetric) {

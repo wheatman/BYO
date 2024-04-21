@@ -13,27 +13,25 @@ namespace gbbs {
  * not necesssarily equal to f(v,u), but we only represent the out-edges of this
  * (possibly) directed graph. */
 template <
-    template <class W> class vertex, class W, class Graph, typename P,
-    typename std::enable_if<std::is_same<vertex<W>, symmetric_vertex<W>>::value,
-                            int>::type = 0>
+    template <class W> class vertex, class W, class Graph, typename P>
 inline std::tuple<size_t, size_t, vertex_data*,
                   typename symmetric_vertex<W>::edge_type*>
 filter_graph(Graph& G, P& pred) {
-  using w_vertex = vertex<W>;
-  size_t n = G.num_vertices();
+  size_t n = G.N();
   auto outOffsets = sequence<uintT>(n + 1);
 
   parallel_for(0, n, 1, [&](size_t i) {
-    w_vertex u = G.get_vertex(i);
-    auto u_out_nghs = u.out_neighbors();
-    auto out_f = [&](uintE j) {
-      return static_cast<int>(
-          pred(i, u_out_nghs.get_neighbor(j), u_out_nghs.get_weight(j)));
-    };
-    auto out_im = parlay::delayed_seq<int>(u.out_degree(), out_f);
+    // w_vertex u = G.get_vertex(i);
+    // auto u_out_nghs = u.out_neighbors();
+    // auto out_f = [&](uintE j) {
+    //   return static_cast<int>(
+    //       pred(i, u_out_nghs.get_neighbor(j), u_out_nghs.get_weight(j)));
+    // };
+    // auto out_im = parlay::delayed_seq<int>(u.out_degree(), out_f);
 
-    if (out_im.size() > 0)
-      outOffsets[i] = parlay::reduce(out_im);
+    if (G.out_degree(i) > 0)
+      // outOffsets[i] = parlay::reduce(out_im);
+      outOffsets[i] = G.count_out_neighbors(i, pred, true);
     else
       outOffsets[i] = 0;
   });
@@ -48,19 +46,27 @@ filter_graph(Graph& G, P& pred) {
   auto out_edges = gbbs::new_array_no_init<edge>(outEdgeCount);
 
   parallel_for(0, n, 1, [&](size_t i) {
-    w_vertex u = G.get_vertex(i);
+    // w_vertex u = G.get_vertex(i);
     size_t out_offset = outOffsets[i];
-    uintE d = u.out_degree();
-    if (d > 0) {
-      edge* nghs = u.neighbors;
-      edge* dir_nghs = out_edges + out_offset;
-      auto pred_c = [&](const edge& e) {
-        return pred(i, std::get<0>(e), std::get<1>(e));
-      };
-      auto n_im_f = [&](size_t j) { return nghs[j]; };
-      auto n_im = parlay::delayed_seq<edge>(d, n_im_f);
-      parlay::filter_out(n_im, gbbs::make_slice(dir_nghs, d), pred_c,
-                         parlay::no_flag);
+    // uintE d = u.out_degree();
+    if (G.out_degree(i) > 0) {
+      // edge* nghs = u.neighbors;
+      // edge* dir_nghs = out_edges + out_offset;
+      // auto pred_c = [&](const edge& e) {
+      //   return pred(i, std::get<0>(e), std::get<1>(e));
+      // };
+      // auto n_im_f = [&](size_t j) { return nghs[j]; };
+      // auto n_im = parlay::delayed_seq<edge>(d, n_im_f);
+      // parlay::filter_out(n_im, gbbs::make_slice(dir_nghs, d), pred_c,
+      //                    parlay::no_flag);
+      size_t index = 0;
+      // TODO(wheatman) maybe do something fancier here to get this in parallel, but there should be suffucuent parallelism in most cases
+      G.map_out_neighbors(i, [&](auto src, auto dest, auto val) {
+        if (pred(src, dest, val)) {
+          out_edges[out_offset+index] = {dest, val};
+          index+=1;
+        }
+      });
     }
   });
 
@@ -71,89 +77,89 @@ filter_graph(Graph& G, P& pred) {
   });
   outOffsets.clear();
 
-  return std::make_tuple(G.num_vertices(), outEdgeCount, out_vdata, out_edges);
+  return std::make_tuple(G.N(), outEdgeCount, out_vdata, out_edges);
 }
 
 // byte version
-template <
-    template <class W> class vertex, class W, class Graph, typename P,
-    typename std::enable_if<
-        std::is_same<vertex<W>, csv_bytepd_amortized<W>>::value, int>::type = 0>
-inline auto filter_graph(Graph& G, P& pred) {
-  size_t n = G.num_vertices();
+// template <
+//     template <class W> class vertex, class W, class Graph, typename P,
+//     typename std::enable_if<
+//         std::is_same<vertex<W>, csv_bytepd_amortized<W>>::value, int>::type = 0>
+// inline auto filter_graph(Graph& G, P& pred) {
+//   size_t n = G.num_vertices();
 
-  debug(std::cout << "# Filtering"
-                  << "\n");
+//   debug(std::cout << "# Filtering"
+//                   << "\n");
 
-  // 1. Calculate total size
-  auto degrees = sequence<uintE>(n);
-  auto byte_offsets = sequence<uintT>(n + 1);
-  parallel_for(0, n, 1, [&](size_t i) {
-    size_t total_bytes = 0;
-    uintE last_ngh = 0;
-    size_t deg = 0;
-    uchar tmp[16];
-    auto f = [&](uintE u, uintE v, W w) {
-      if (pred(u, v, w)) {
-        size_t bytes = 0;
-        if (deg == 0) {
-          bytes = byte::compressFirstEdge(tmp, bytes, u, v);
-          bytes = byte::compressWeight<W>(tmp, bytes, w);
-        } else {
-          bytes = byte::compressEdge(tmp, bytes, v - last_ngh);
-          bytes = byte::compressWeight<W>(tmp, bytes, w);
-        }
-        last_ngh = v;
-        total_bytes += bytes;
-        deg++;
-      }
-      return false;
-    };
-    G.get_vertex(i).out_neighbors().map(f, false);
+//   // 1. Calculate total size
+//   auto degrees = sequence<uintE>(n);
+//   auto byte_offsets = sequence<uintT>(n + 1);
+//   parallel_for(0, n, 1, [&](size_t i) {
+//     size_t total_bytes = 0;
+//     uintE last_ngh = 0;
+//     size_t deg = 0;
+//     uchar tmp[16];
+//     auto f = [&](uintE u, uintE v, W w) {
+//       if (pred(u, v, w)) {
+//         size_t bytes = 0;
+//         if (deg == 0) {
+//           bytes = byte::compressFirstEdge(tmp, bytes, u, v);
+//           bytes = byte::compressWeight<W>(tmp, bytes, w);
+//         } else {
+//           bytes = byte::compressEdge(tmp, bytes, v - last_ngh);
+//           bytes = byte::compressWeight<W>(tmp, bytes, w);
+//         }
+//         last_ngh = v;
+//         total_bytes += bytes;
+//         deg++;
+//       }
+//       return false;
+//     };
+//     G.get_vertex(i).out_neighbors().map(f, false);
 
-    degrees[i] = deg;
-    byte_offsets[i] = total_bytes;
-  });
-  byte_offsets[n] = 0;
-  size_t last_offset = parlay::scan_inplace(byte_offsets);
-  std::cout << "# size is: " << last_offset << "\n";
+//     degrees[i] = deg;
+//     byte_offsets[i] = total_bytes;
+//   });
+//   byte_offsets[n] = 0;
+//   size_t last_offset = parlay::scan_inplace(byte_offsets);
+//   std::cout << "# size is: " << last_offset << "\n";
 
-  size_t edges_size = last_offset;
-  auto edges = gbbs::new_array_no_init<uchar>(edges_size);
+//   size_t edges_size = last_offset;
+//   auto edges = gbbs::new_array_no_init<uchar>(edges_size);
 
-  parallel_for(0, n, 1, [&](size_t i) {
-    uintE new_deg = degrees[i];
-    if (new_deg > 0) {
-      auto app_pred = [&](std::tuple<uintE, W> val) {
-        return pred(i, std::get<0>(val), std::get<1>(val));
-      };
+//   parallel_for(0, n, 1, [&](size_t i) {
+//     uintE new_deg = degrees[i];
+//     if (new_deg > 0) {
+//       auto app_pred = [&](std::tuple<uintE, W> val) {
+//         return pred(i, std::get<0>(val), std::get<1>(val));
+//       };
 
-      auto iter = G.get_vertex(i).out_neighbors().get_iter();
-      auto f_it = gbbs::make_filter_iter<std::tuple<uintE, W>>(iter, app_pred);
-      size_t nbytes = byte::sequentialCompressEdgeSet<W>(
-          edges + byte_offsets[i], 0, new_deg, i, f_it);
-      if (nbytes != (byte_offsets[i + 1] - byte_offsets[i])) {
-        std::cout << "# degree is: " << new_deg << " nbytes should be: "
-                  << (byte_offsets[i + 1] - byte_offsets[i])
-                  << " but is: " << nbytes << "\n";
-        assert(nbytes == (byte_offsets[i + 1] - byte_offsets[i]));
-      }
-    }
-  });
+//       auto iter = G.get_vertex(i).out_neighbors().get_iter();
+//       auto f_it = gbbs::make_filter_iter<std::tuple<uintE, W>>(iter, app_pred);
+//       size_t nbytes = byte::sequentialCompressEdgeSet<W>(
+//           edges + byte_offsets[i], 0, new_deg, i, f_it);
+//       if (nbytes != (byte_offsets[i + 1] - byte_offsets[i])) {
+//         std::cout << "# degree is: " << new_deg << " nbytes should be: "
+//                   << (byte_offsets[i + 1] - byte_offsets[i])
+//                   << " but is: " << nbytes << "\n";
+//         assert(nbytes == (byte_offsets[i + 1] - byte_offsets[i]));
+//       }
+//     }
+//   });
 
-  auto out_vdata = gbbs::new_array_no_init<vertex_data>(n);
-  parallel_for(0, n, [&](size_t i) {
-    out_vdata[i].offset = byte_offsets[i];
-    out_vdata[i].degree = degrees[i];
-  });
-  byte_offsets.clear();
+//   auto out_vdata = gbbs::new_array_no_init<vertex_data>(n);
+//   parallel_for(0, n, [&](size_t i) {
+//     out_vdata[i].offset = byte_offsets[i];
+//     out_vdata[i].degree = degrees[i];
+//   });
+//   byte_offsets.clear();
 
-  auto deg_f = [&](size_t i) { return degrees[i]; };
-  auto deg_map = parlay::delayed_seq<size_t>(n, deg_f);
-  uintT total_deg = parlay::reduce(deg_map);
-  std::cout << "# Filtered, total_deg = " << total_deg << "\n";
-  return std::make_tuple(G.num_vertices(), edges_size, out_vdata, edges);
-}
+//   auto deg_f = [&](size_t i) { return degrees[i]; };
+//   auto deg_map = parlay::delayed_seq<size_t>(n, deg_f);
+//   uintT total_deg = parlay::reduce(deg_map);
+//   std::cout << "# Filtered, total_deg = " << total_deg << "\n";
+//   return std::make_tuple(G.num_vertices(), edges_size, out_vdata, edges);
+// }
 
 template <
     template <class W> class vertex, class W, class Graph, typename P,

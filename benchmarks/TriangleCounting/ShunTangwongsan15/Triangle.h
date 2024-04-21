@@ -61,7 +61,7 @@ inline uintE* rankNodes(Graph& G, size_t n) {
 
   parallel_for(0, n, kDefaultGranularity, [&](size_t i) { o[i] = i; });
   parlay::sample_sort_inplace(make_slice(o), [&](const uintE u, const uintE v) {
-    return G.get_vertex(u).out_degree() < G.get_vertex(v).out_degree();
+    return G.out_degree(u) < G.out_degree(v);
   });
   parallel_for(0, n, kDefaultGranularity, [&](size_t i) { r[o[i]] = i; });
   return r;
@@ -169,14 +169,14 @@ inline size_t Triangle_degree_ordering(Graph& G, const F& f) {
   using W = typename Graph::weight_type;
   timer gt;
   gt.start();
-  uintT n = G.n;
+  uintT n = G.N();
   auto counts = sequence<size_t>::uninitialized(n);
   parallel_for(0, n, kDefaultGranularity, [&](size_t i) { counts[i] = 0; });
 
   // 1. Rank vertices based on degree
   timer rt;
   rt.start();
-  uintE* rank = rankNodes(G, G.n);
+  uintE* rank = rankNodes(G, G.N());
   rt.stop();
   rt.next("rank time");
 
@@ -199,7 +199,7 @@ inline size_t Triangle_degree_ordering(Graph& G, const F& f) {
   std::cout << "### Num triangles = " << count << "\n";
   ct.stop();
   ct.next("count time");
-  gbbs::free_array(rank, G.n);
+  gbbs::free_array(rank, G.N());
   return count;
 }
 

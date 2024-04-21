@@ -15,20 +15,19 @@
 #include "cpam/cpam.h"
 #include "gbbs/bridge.h"
 
-template <class T>
-class CPAMWrapper {
+template <class T> class CPAMWrapper {
   struct edge_entry {
-    using key_t = T;  // a vertex_id
+    using key_t = T; // a vertex_id
     static inline bool comp(key_t a, key_t b) { return a < b; }
   };
-  #ifdef CPAM_COMPRESSED
+#ifdef CPAM_COMPRESSED
   using edge_tree = cpam::diff_encoded_set<edge_entry, 64>;
-  #else
+#else
   using edge_tree = cpam::pam_set<edge_entry, 64>;
-  #endif
+#endif
   edge_tree tree;
 
- public:
+public:
   size_t size() const { return tree.size(); }
 
   CPAMWrapper(auto begin, auto end) {
@@ -38,20 +37,17 @@ class CPAMWrapper {
   }
   CPAMWrapper() = default;
 
-  template <class F>
-  void map(F f) const {
+  template <class F> void map(F f) const {
     auto map_f = [&](const auto &et) { f(et, {}); };
     ((edge_tree)tree).iterate_seq(map_f);
   }
 
-  template <class F>
-  void map_early_exit(F f) const {
+  template <class F> void map_early_exit(F f) const {
     auto map_f = [&](const auto &et) { return !f(et, {}); };
     tree.foreach_cond(tree, map_f);
   }
 
-  template <class F>
-  void parallel_map(F f) const {
+  template <class F> void parallel_map(F f) const {
     auto map_f = [&](const auto &et, size_t i) { f(et, {}); };
     tree.foreach_index(tree, map_f);
   }
@@ -65,14 +61,24 @@ class CPAMWrapper {
   void insert(auto el) { tree.insert(el); }
   void erase(auto el) { tree.remove(el); }
 
-  void insert_sorted_batch(auto es, size_t n) {
+  // TODO, these both perform an extra copy since the multi_insert function
+  // can't take in a arbitrary range
+  void insert_sorted_batch(const auto &start, const auto &end) {
+    gbbs::sequence<T> seq(start, end);
     auto replace = [](const auto &a, const auto &b) { return b; };
     tree = edge_tree::multi_insert_sorted(
-        tree, std::ranges::subrange(es, es + n), replace);
+        tree, std::ranges::subrange(seq.data(), seq.data() + seq.size()),
+        replace);
   }
-  void remove_sorted_batch(auto es, size_t n) {
-    tree =
-        edge_tree::multi_delete_sorted(tree, std::ranges::subrange(es, es + n));
+  void remove_sorted_batch(const auto &start, const auto &end) {
+    gbbs::sequence<T> seq(start, end);
+    tree = edge_tree::multi_delete_sorted(
+        tree, std::ranges::subrange(seq.data(), seq.data() + seq.size()));
+  }
+
+  size_t get_memory_size() {
+    auto noop = [](const auto &q) { return 0; };
+    return tree.size_in_bytes(noop);
   }
 };
 
@@ -84,13 +90,16 @@ static constexpr bool use_inplace = true;
 static constexpr bool use_inplace = false;
 #endif
 
-using graph_impl = gbbs::graph_implementations::symmetric_set_graph<
-    gbbs::symmetric_vertex, gbbs::empty, CPAMWrapper<gbbs::uintE>,
+using sym_graph_impl =
+    gbbs::graph_implementations::symmetric_set_graph<CPAMWrapper<gbbs::uintE>,
+                                                     gbbs::empty,
+                                                     /* inplace */ use_inplace>;
+
+using asym_graph_impl = gbbs::graph_implementations::asymmetric_set_graph<
+    CPAMWrapper<gbbs::uintE>, gbbs::empty,
     /* inplace */ use_inplace>;
 
 using graph_api = gbbs::full_api;
-
-using graph_t = gbbs::Graph<graph_impl, /* symmetric */ true, graph_api>;
 
 int main(int argc, char *argv[]) {
   gbbs::commandLine P(argc, argv, " [-s] <inFile>");
@@ -102,19 +111,30 @@ int main(int argc, char *argv[]) {
   gbbs::run_all_options options;
   options.dump = P.getOptionValue("-d");
   options.rounds = P.getOptionLongValue("-rounds", 3);
+  options.max_batch =
+      static_cast<size_t>(P.getOptionLongValue("-max_batch", 1000000));
   options.src = static_cast<gbbs::uintE>(P.getOptionLongValue("-src", 0));
+  options.inserts = P.getOptionValue("-i");
 
   std::cout << "### Graph: " << iFile << std::endl;
   if (compressed) {
-    std::cerr << "is always compressed, but reads in uncompressed files\n";
+    std::cerr << "does not support compression\n";
     return -1;
   } else {
     if (symmetric) {
+      using graph_t =
+          gbbs::Graph<sym_graph_impl, /* symmetric */ true, graph_api>;
       auto G = gbbs::gbbs_io::read_unweighted_symmetric_graph<graph_t>(
           iFile, mmap, binary);
-      run_all<true>(G, options);
+      auto bytes_used = G.get_memory_size();
+      std::cout << "total bytes used = " << bytes_used << "\n";
+      run_all(G, options);
     } else {
-      std::cerr << "does not support directed graphs yet\n";
+      using graph_t =
+          gbbs::Graph<asym_graph_impl, /* symmetric */ false, graph_api>;
+      auto G = gbbs::gbbs_io::read_unweighted_symmetric_graph<graph_t>(
+          iFile, mmap, binary);
+      run_all(G, options);
       return -1;
     }
   }

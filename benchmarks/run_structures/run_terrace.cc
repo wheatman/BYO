@@ -21,14 +21,14 @@
 #include "gbbs/bridge.h"
 #include "terrace/terrace_graph.h"
 
-template <template <class W> class vertex_type, class W>
-struct symmetric_terrace_graph {
-  using vertex = vertex_type<W>;
+#include "../run_unweighted.h"
+
+template <class W> struct symmetric_terrace_graph {
   using weight_type = W;
   static constexpr bool binary = true;
   static_assert(binary);
   using vertex_weight_type = double;
-  using edge_type = typename vertex::edge_type;
+  using edge_type = std::tuple<gbbs::uintE, W>;
 
   size_t M() const { return nodes.get_num_edges(); }
 
@@ -163,11 +163,14 @@ struct symmetric_terrace_graph {
   }
 
   void remove_sorted_batch(std::tuple<uint32_t, uint32_t> *es, size_t n) {
-    parlay::parallel_for(0, n, [&] (size_t i) {
+    parlay::parallel_for(0, n, [&](size_t i) {
       nodes.remove_edge(std::get<0>(es[i]), std::get<1>(es[i]));
     });
   }
 
+  size_t get_memory_size() {
+    return nodes.get_size();
+  }
 
   // Graph Data
   graphstore::TerraceGraph nodes;
@@ -176,9 +179,7 @@ struct symmetric_terrace_graph {
   std::function<void()> deletion_fn;
 };
 
-#include "../run_unweighted.h"
-
-using graph_impl = symmetric_terrace_graph<gbbs::symmetric_vertex, gbbs::empty>;
+using graph_impl = symmetric_terrace_graph<gbbs::empty>;
 
 using graph_api = gbbs::full_api;
 
@@ -194,7 +195,10 @@ int main(int argc, char *argv[]) {
   gbbs::run_all_options options;
   options.dump = P.getOptionValue("-d");
   options.rounds = P.getOptionLongValue("-rounds", 3);
+  options.max_batch =
+      static_cast<size_t>(P.getOptionLongValue("-max_batch", 1000000));
   options.src = static_cast<gbbs::uintE>(P.getOptionLongValue("-src", 0));
+  options.inserts = P.getOptionValue("-i");
 
   std::cout << "### Graph: " << iFile << std::endl;
   if (compressed) {
@@ -204,7 +208,9 @@ int main(int argc, char *argv[]) {
     if (symmetric) {
       auto G = gbbs::gbbs_io::read_unweighted_symmetric_graph<graph_t>(
           iFile, mmap, binary);
-      run_all<true>(G, options);
+      auto bytes_used = G.get_memory_size();
+      std::cout << "total bytes used = " << bytes_used << "\n";
+      run_all(G, options);
     } else {
       std::cerr << "does not support directed graphs yet\n";
       return -1;

@@ -184,7 +184,7 @@ inline vertexSubsetData<Data> edgeMapDenseForward(Graph& GA, VS& vertexSubset,
   static constexpr bool has_data = !std::is_same_v<Data, gbbs::empty>;
   size_t n = GA.N();
   if (should_output(fl)) {
-    typename std::conditional<has_data, sequence<D>, BitArray>::type next(n);
+    typename std::conditional<has_data, sequence<D>, sequence<uint8_t>>::type next(n);
     if
       constexpr(has_data) {
       parallel_for(0, n, [&](size_t i) { std::get<0>(next[i]) = 0; },
@@ -197,7 +197,7 @@ inline vertexSubsetData<Data> edgeMapDenseForward(Graph& GA, VS& vertexSubset,
               auto m = f.updateAtomic(src, target, weight);
               if constexpr (!has_data) {
                 if (m)
-                  next.set(target);
+                  next[target] = true;
               } else {
                 if (m.has_value())
                   next[target] = std::make_tuple(1, *m);
@@ -213,7 +213,18 @@ inline vertexSubsetData<Data> edgeMapDenseForward(Graph& GA, VS& vertexSubset,
           }
         },
         1);
-    return vertexSubsetData<Data>(n, std::move(next));
+    if constexpr (has_data) {
+      return vertexSubsetData<Data>(n, std::move(next));
+    } else {
+      BitArray ba = BitArray(n);
+      aligned_parallel_for(0, n, 256, [&](size_t i) {
+        if (next[i]) {
+          ba.set(i);
+        }
+      });
+      return vertexSubsetData<Data>(n, std::move(ba));
+    }
+
   } else {
     parallel_for(0, n,
                  [&](size_t i) {

@@ -12,8 +12,8 @@
 //     -s : indicate that the graph is symmetric
 //     -d : dump the output arrays to files, useful for debugging
 
-#include <cstdio>
 #include <cstdint>
+#include <cstdio>
 #include <iterator>
 #include <utility>
 
@@ -33,10 +33,10 @@ class AspenWrapper {
     static bool comp(const key_t& a, const key_t& b) { return a < b; }
     using aug_t = uintV; // num. edges in this subtree
     static aug_t get_empty() { return 0; }
-    static aug_t from_entry(const key_t& k, const val_t& v) { return 1 + compressed_lists::node_size(v); }
-    static aug_t combine(const aug_t& a, const aug_t& b) { return a + b; }
-    using entry_t = std::pair<key_t,val_t>;
-    static entry_t copy_entry(const entry_t& e) {
+    static aug_t from_entry(const key_t& k, const val_t& v) { return 1 +
+  compressed_lists::node_size(v); } static aug_t combine(const aug_t& a, const
+  aug_t& b) { return a + b; } using entry_t = std::pair<key_t,val_t>; static
+  entry_t copy_entry(const entry_t& e) {
       // TODO: Instead of copying, bump a ref-ct (note that copy_node and
       // deallocate can implement these semantics internally)
       return std::make_pair(e.first, compressed_lists::copy_node(e.second));
@@ -54,73 +54,78 @@ class AspenWrapper {
   using edge_tree = tree_plus::treeplus;
   edge_tree edges;
 
-  struct aux_init{
-    struct singleton{
-      singleton(){
+  struct aux_init {
+    struct singleton {
+      singleton() {
         using edge_list = tree_plus::edge_list;
         edge_list::init();
         // following the setting in the original Aspen code
         const size_t n_max = 70000000;
-        edge_list::reserve(n_max/16);
+        edge_list::reserve(n_max / 16);
         lists::init(n_max);
       }
     };
-    
+
     aux_init() { static singleton impl; }
   };
 
   // make sure edge_list always gets initialized if any edge_tree is used
   aux_init aux = {};
 
- public:
+public:
   AspenWrapper() = default;
-  AspenWrapper(const AspenWrapper&) = default;
-  AspenWrapper(AspenWrapper&&) = default;
-  AspenWrapper& operator=(const AspenWrapper&) = default;
-  AspenWrapper& operator=(AspenWrapper&&) = default;
+  AspenWrapper(const AspenWrapper &) = default;
+  AspenWrapper(AspenWrapper &&) = default;
+  AspenWrapper &operator=(const AspenWrapper &) = default;
+  AspenWrapper &operator=(AspenWrapper &&) = default;
 
-  template<typename Iter>
-  AspenWrapper(Iter begin, Iter end) {
+  template <typename Iter> AspenWrapper(Iter begin, Iter end) {
     edges.del();
-    edges = edge_tree(parlay::slice(begin,end), 0);
+    edges = edge_tree(std::ranges::subrange(begin, end), 0);
   }
 
   size_t size() const { return edges.size(); }
 
-  template <class F>
-  void map(F f) const {
-    auto g = [&](const uintV& ngh) { f(ngh, {}); };
+  template <class F> void map(F f) const {
+    auto g = [&](const uintV &ngh) { f(ngh, {}); };
     edges.iter_elms(0, g);
   }
 
-  template <class F>
-  void map_early_exit(F f) const {
-    auto g = [&](const uintV& ngh) { return f(ngh, {}); };
+  template <class F> void map_early_exit(F f) const {
+    auto g = [&](const uintV &ngh) { return f(ngh, {}); };
     edges.iter_elms_cond(0, g);
   }
 
-  template <class F>
-  void parallel_map(F f) const {
-    auto g = [&](const uintV& ngh, size_t ind) { f(ngh, {}); };
+  template <class F> void parallel_map(F f) const {
+    auto g = [&](const uintV &ngh, size_t ind) { f(ngh, {}); };
     edges.map_elms(0, g);
   }
 
-  //template <class F>
-  //void parallel_map_early_exit(F f) const {
-    //auto map_f = [&](const auto& et) { return f(et, {}); };
-    //edges.foreach_cond_par(edges, map_f, []() { return true; });
+  // template <class F>
+  // void parallel_map_early_exit(F f) const {
+  // auto map_f = [&](const auto& et) { return f(et, {}); };
+  // edges.foreach_cond_par(edges, map_f, []() { return true; });
   //}
 
-  void insert_sorted_batch(auto es, size_t n) {
-    edges = tree_plus::uniont(edges, edge_tree(parlay::slice(es,es+n),0), 0);
+  void insert_sorted_batch(const auto &start, const auto &end) {
+    edges = tree_plus::uniont(
+        edges, edge_tree(std::ranges::subrange(start, end), 0), 0);
   }
-  void remove_sorted_batch(auto es, size_t n) {
+  void remove_sorted_batch(const auto &start, const auto &end) {
     // auto to_remove = parlay::tabulate(n, [&](size_t i){return *(es+i);});
-    // auto bool_seq = parlay::delayed_seq<bool>(to_remove.size(), [&](size_t i) {
+    // auto bool_seq = parlay::delayed_seq<bool>(to_remove.size(), [&](size_t i)
+    // {
     //   return (i == 0 || to_remove[i] != to_remove[i-1]);
     // });
     // to_remove = parlay::pack(to_remove, bool_seq);
-    edges = tree_plus::difference(edge_tree(parlay::slice(es,es+n),0), edges, 0);
+    edges = tree_plus::difference(
+        edge_tree(std::ranges::subrange(start, end), 0), edges, 0);
+  }
+
+  size_t get_memory_size() {
+    // TODO(wheatman) only works for unweighted uncompressed graphs
+    using node_t = typename edge_tree::Node;
+    return edges.size_in_bytes(0) + edges.edge_tree_nodes() * sizeof(node_t);
   }
 };
 
@@ -132,17 +137,19 @@ static constexpr bool use_inplace = true;
 static constexpr bool use_inplace = false;
 #endif
 
-using graph_impl = gbbs::graph_implementations::symmetric_set_graph<
-    gbbs::symmetric_vertex, gbbs::empty, AspenWrapper,
+using sym_graph_impl =
+    gbbs::graph_implementations::symmetric_set_graph<AspenWrapper, gbbs::empty,
+                                                     /* inplace */ use_inplace>;
+
+using asym_graph_impl = gbbs::graph_implementations::asymmetric_set_graph<
+    AspenWrapper, gbbs::empty,
     /* inplace */ use_inplace>;
 
 using graph_api = gbbs::full_api;
 
-using graph_t = gbbs::Graph<graph_impl, /* symmetric */ true, graph_api>;
-
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[]) {
   gbbs::commandLine P(argc, argv, " [-s] <inFile>");
-  char* iFile = P.getArgument(0);
+  char *iFile = P.getArgument(0);
   bool symmetric = P.getOptionValue("-s");
   bool compressed = P.getOptionValue("-c");
   bool binary = P.getOptionValue("-b");
@@ -150,19 +157,30 @@ int main(int argc, char* argv[]) {
   gbbs::run_all_options options;
   options.dump = P.getOptionValue("-d");
   options.rounds = P.getOptionLongValue("-rounds", 3);
+  options.max_batch =
+      static_cast<size_t>(P.getOptionLongValue("-max_batch", 1000000));
   options.src = static_cast<gbbs::uintE>(P.getOptionLongValue("-src", 0));
+  options.inserts = P.getOptionValue("-i");
 
   std::cout << "### Graph: " << iFile << std::endl;
   if (compressed) {
-    std::cerr << "is always compressed, but reads in uncompressed files\n";
+    std::cerr << "does not support compression\n";
     return -1;
   } else {
     if (symmetric) {
+      using graph_t =
+          gbbs::Graph<sym_graph_impl, /* symmetric */ true, graph_api>;
       auto G = gbbs::gbbs_io::read_unweighted_symmetric_graph<graph_t>(
           iFile, mmap, binary);
-      run_all<true>(G, options);
+      auto bytes_used = G.get_memory_size();
+      std::cout << "total bytes used = " << bytes_used << "\n";
+      run_all(G, options);
     } else {
-      std::cerr << "does not support directed graphs yet\n";
+      using graph_t =
+          gbbs::Graph<asym_graph_impl, /* symmetric */ false, graph_api>;
+      auto G = gbbs::gbbs_io::read_unweighted_symmetric_graph<graph_t>(
+          iFile, mmap, binary);
+      run_all(G, options);
       return -1;
     }
   }

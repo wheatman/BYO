@@ -18,13 +18,13 @@
 #include "gbbs/bridge.h"
 #include "semisort.h"
 
-template <template <class W> class vertex_type, class W>
-struct symmetric_dhb_graph {
-  using vertex = vertex_type<W>;
+#include "../run_unweighted.h"
+
+template <class W> struct symmetric_dhb_graph {
   using weight_type = W;
   static constexpr bool binary = std::is_same_v<gbbs::empty, W>;
   using vertex_weight_type = double;
-  using edge_type = typename vertex::edge_type;
+  using edge_type = std::tuple<gbbs::uintE, W>;
 
   size_t N() const { return nodes.vertices_count(); }
 
@@ -105,18 +105,36 @@ struct symmetric_dhb_graph {
     };
   }
 
-  void insert_sorted_grouped_batch(const parlay::sequence<std::pair<uint32_t, parlay::sequence<uint32_t>>> & els) {
-    parlay::parallel_for(0, els.size(), [&](size_t i) {
-      for (const auto& el : els[i].second) {
-          nodes.insert(els[i].first, el, {}, true);
+  // void insert_sorted_grouped_batch(const parlay::sequence<std::pair<uint32_t,
+  // parlay::sequence<uint32_t>>> & els) {
+  //   parlay::parallel_for(0, els.size(), [&](size_t i) {
+  //     for (const auto& el : els[i].second) {
+  //         nodes.insert(els[i].first, el, {}, true);
+  //     }
+  //   });
+  // }
+
+  // void remove_sorted_grouped_batch(const parlay::sequence<std::pair<uint32_t,
+  // parlay::sequence<uint32_t>>> & els) {
+  //   parlay::parallel_for(0, els.size(), [&](size_t i) {
+  //     for (const auto& el : els[i].second) {
+  //         nodes.removeEdge(els[i].first, el);
+  //     }
+  //   });
+  // }
+
+  void insert_pervertex_range(const auto *es, const auto &offsets) {
+    parlay::parallel_for(0, offsets.size() - 1, [&](size_t i) {
+      for (auto it = es + offsets[i]; it < es + offsets[i + 1]; ++it) {
+        nodes.insert(std::get<0>(*it), std::get<1>(*it), {}, true);
       }
     });
   }
 
-  void remove_sorted_grouped_batch(const parlay::sequence<std::pair<uint32_t, parlay::sequence<uint32_t>>> & els) {
-    parlay::parallel_for(0, els.size(), [&](size_t i) {
-      for (const auto& el : els[i].second) {
-          nodes.removeEdge(els[i].first, el);
+  void remove_pervertex_range(const auto *es, const auto &offsets) {
+    parlay::parallel_for(0, offsets.size() - 1, [&](size_t i) {
+      for (auto it = es + offsets[i]; it < es + offsets[i + 1]; ++it) {
+        nodes.removeEdge(std::get<0>(*it), std::get<1>(*it));
       }
     });
   }
@@ -130,9 +148,7 @@ struct symmetric_dhb_graph {
   std::function<void()> deletion_fn;
 };
 
-#include "../run_unweighted.h"
-
-using graph_impl = symmetric_dhb_graph<gbbs::symmetric_vertex, gbbs::empty>;
+using graph_impl = symmetric_dhb_graph<gbbs::empty>;
 
 using graph_api = gbbs::full_api;
 
@@ -148,7 +164,10 @@ int main(int argc, char *argv[]) {
   gbbs::run_all_options options;
   options.dump = P.getOptionValue("-d");
   options.rounds = P.getOptionLongValue("-rounds", 3);
+  options.max_batch =
+      static_cast<size_t>(P.getOptionLongValue("-max_batch", 1000000));
   options.src = static_cast<gbbs::uintE>(P.getOptionLongValue("-src", 0));
+  options.inserts = P.getOptionValue("-i");
 
   std::cout << "### Graph: " << iFile << std::endl;
   if (compressed) {
@@ -158,7 +177,9 @@ int main(int argc, char *argv[]) {
     if (symmetric) {
       auto G = gbbs::gbbs_io::read_unweighted_symmetric_graph<graph_t>(
           iFile, mmap, binary);
-      run_all<true>(G, options);
+      auto bytes_used = G.get_memory_size();
+      std::cout << "total bytes used = " << bytes_used << "\n";
+      run_all(G, options);
     } else {
       std::cerr << "does not support directed graphs yet\n";
       return -1;

@@ -95,12 +95,12 @@ public:
 #if CILK == 1
     Cilksan_fake_lock_guard guad(&fake_lock);
 #endif
-    data[worker_num].f = monoid.f(data[worker_num].f, new_value);
+    data[worker_num].f = monoid(data[worker_num].f, new_value);
   }
   F get() const {
     F output = monoid.identity;
     for (const auto &d : data) {
-      output = monoid.f(output, d.f);
+      output = monoid(output, d.f);
     }
     return output;
   }

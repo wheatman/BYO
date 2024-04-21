@@ -37,6 +37,7 @@ cc_library(
     linkopts = ["-pthread"],
     deps = [
         "@parlaylib//parlay:delayed_sequence",
+        "@parlaylib//parlay:delayed",
         "@parlaylib//parlay:io",
         "@parlaylib//parlay:monoid",
         "@parlaylib//parlay:parallel",
@@ -51,6 +52,7 @@ cc_library(
         "@parlaylib//parlay/internal:get_time",
         "@parlaylib//parlay/internal:group_by",
         "@parlaylib//parlay/internal/posix:file_map_impl_posix",
+        "@parlaylib//parlay/internal:heap_tree",
     ],
 )
 

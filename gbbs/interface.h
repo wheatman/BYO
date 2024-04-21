@@ -78,21 +78,18 @@ vertexSubsetData<uintE> srcPack(Graph& G, vertexSubset& vs, P p, flags fl = 0) {
 // not necesssarily equal to f(v,u), but we only represent the out-edges of
 // this (possibly) directed graph. For convenience in cases where the graph
 // needed is symmetric, we coerce this to a symmetric_graph.
-template <
-    template <class inner_wgh> class vtx_type, class wgh_type, typename P,
-    typename std::enable_if<
-        std::is_same<vtx_type<wgh_type>, symmetric_vertex<wgh_type>>::value,
-        int>::type = 0>
-static inline Graph<graph_implementations::symmetric_graph<symmetric_vertex, wgh_type>, true> filterGraph(
-    Graph<graph_implementations::symmetric_graph<vtx_type, wgh_type>, true>& G, P& pred) {
-  auto ret = filter_graph<vtx_type, wgh_type>(G, pred);
+template <class Graph, typename P>
+static inline graph_implementations::symmetric_graph<symmetric_vertex,
+                                                     gbbs::empty>
+filterGraph(Graph &G, P &pred) {
+  auto ret = filter_graph<symmetric_vertex, gbbs::empty>(G, pred);
   auto newN = std::get<0>(ret);
   auto newM = std::get<1>(ret);
   auto newVData = std::get<2>(ret);
   auto newEdges = std::get<3>(ret);
 
   assert(newN == G.num_vertices());
-  return Graph<graph_implementations::symmetric_graph<symmetric_vertex, wgh_type>, true>(
+  return graph_implementations::symmetric_graph<symmetric_vertex, gbbs::empty>(
       newVData, newN, newM,
       [=]() {
         gbbs::free_array(newVData, newN);
@@ -101,27 +98,27 @@ static inline Graph<graph_implementations::symmetric_graph<symmetric_vertex, wgh
       newEdges);
 }
 
-template <
-    template <class inner_wgh> class vtx_type, class wgh_type, typename P,
-    typename std::enable_if<
-        std::is_same<vtx_type<wgh_type>, csv_bytepd_amortized<wgh_type>>::value,
-        int>::type = 0>
-static inline Graph<graph_implementations::symmetric_graph<csv_byte, wgh_type>, true> filterGraph(
-    Graph<graph_implementations::symmetric_graph<vtx_type, wgh_type>, true>& G, P& pred) {
-  auto ret = filter_graph<vtx_type, wgh_type>(G, pred);
-  auto newN = std::get<0>(ret);
-  auto newM = std::get<1>(ret);
-  auto newVData = std::get<2>(ret);
-  auto newEdges = std::get<3>(ret);
+// template <
+//     template <class inner_wgh> class vtx_type, class wgh_type, typename P,
+//     typename std::enable_if<
+//         std::is_same<vtx_type<wgh_type>, csv_bytepd_amortized<wgh_type>>::value,
+//         int>::type = 0>
+// static inline graph_implementations::symmetric_graph<csv_byte, wgh_type> filterGraph(
+//     Graph<graph_implementations::symmetric_graph<vtx_type, wgh_type>, true>& G, P& pred) {
+//   auto ret = filter_graph<vtx_type, wgh_type>(G, pred);
+//   auto newN = std::get<0>(ret);
+//   auto newM = std::get<1>(ret);
+//   auto newVData = std::get<2>(ret);
+//   auto newEdges = std::get<3>(ret);
 
-  assert(newN == G.num_vertices());
-  return Graph<graph_implementations::symmetric_graph<csv_byte, wgh_type>, true>(newVData, newN, newM,
-                                             [=]() {
-                                               gbbs::free_array(newVData, newN);
-                                               gbbs::free_array(newEdges, newM);
-                                             },
-                                             newEdges);
-}
+//   assert(newN == G.num_vertices());
+//   return graph_implementations::symmetric_graph<csv_byte, wgh_type>(newVData, newN, newM,
+//                                              [=]() {
+//                                                gbbs::free_array(newVData, newN);
+//                                                gbbs::free_array(newEdges, newM);
+//                                              },
+//                                              newEdges);
+// }
 
 // Used by MST and MaximalMatching
 // Predicate returns three values:

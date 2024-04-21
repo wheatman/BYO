@@ -1,0 +1,8 @@
+cc_library(
+    name = "pcsr_orig",
+    hdrs = ["PCSR.hpp"],
+)
+
+package(
+    default_visibility = ["//visibility:public"],
+)

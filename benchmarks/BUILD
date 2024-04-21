@@ -21,6 +21,18 @@ cc_library(
      "//benchmarks/Spanner/MPXV15:Spanner",
      "//benchmarks/Map/Base:Map",
      "//benchmarks/Map/RemoteRead:Map",
+     "//benchmarks/TriangleCounting/ShunTangwongsan15:Triangle"
+     ],
+)
+
+cc_library(
+    name = "run_weighted",
+    hdrs = ["run_weighted.h"],
+    deps = [
+     "//benchmarks/IntegralWeightSSSP/JulienneDBS17:wBFS",
+     "//benchmarks/GeneralWeightSSSP/BellmanFord:BellmanFord",
+     "//benchmarks/PositiveWeightSSSP/DeltaStepping:DeltaStepping",
+     "//benchmarks/SSWidestPath/JulienneDBS17:SSWidestPath",
      ],
 )
 

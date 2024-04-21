@@ -235,13 +235,14 @@ G read_unweighted_asymmetric_graph(
 
 std::tuple<char*, size_t> parse_compressed_graph(const char* fname, bool mmap);
 
-template <class weight_type>
-Graph<graph_implementations::symmetric_graph<symmetric_vertex, weight_type>, true> read_weighted_symmetric_graph(
-    const char* fname, bool mmap, bool binary, char* bytes = nullptr,
+template <class G>
+G read_weighted_symmetric_graph(
+    const char *fname, bool mmap, bool binary, char *bytes = nullptr,
     size_t bytes_size = std::numeric_limits<size_t>::max()) {
+  using weight_type = G::weight_type;
   size_t n, m;
-  uintT* offsets;
-  std::tuple<uintE, weight_type>* edges;
+  uintT *offsets;
+  std::tuple<uintE, weight_type> *edges;
   std::tie(n, m, offsets, edges) = internal::parse_weighted_graph<weight_type>(
       fname, mmap, binary, bytes, bytes_size);
 
@@ -254,7 +255,7 @@ Graph<graph_implementations::symmetric_graph<symmetric_vertex, weight_type>, tru
     gbbs::free_array(offsets, n + 1);
   }
 
-  return Graph<graph_implementations::symmetric_graph<symmetric_vertex, weight_type>, true>(
+  return G(
       v_data, n, m,
       [=]() {
         gbbs::free_array(v_data, n);
@@ -265,16 +266,17 @@ Graph<graph_implementations::symmetric_graph<symmetric_vertex, weight_type>, tru
       edges);
 }
 
-template <class weight_type>
-Graph<graph_implementations::asymmetric_graph<asymmetric_vertex, weight_type>, false> read_weighted_asymmetric_graph(
-    const char* fname, bool mmap, bool binary, char* bytes = nullptr,
+template <class G>
+G read_weighted_asymmetric_graph(
+    const char *fname, bool mmap, bool binary, char *bytes = nullptr,
     size_t bytes_size = std::numeric_limits<size_t>::max()) {
+  using weight_type = G::weight_type;
   using id_and_weight = std::tuple<uintE, weight_type>;
   using triple = std::pair<uintE, std::pair<uintE, weight_type>>;
 
   size_t n, m;
-  uintT* offsets;
-  std::tuple<uintE, weight_type>* edges;
+  uintT *offsets;
+  std::tuple<uintE, weight_type> *edges;
   if (binary) {
     std::cout << "Todo: implement binary support for asymmetric graphs"
               << std::endl;
@@ -292,12 +294,12 @@ Graph<graph_implementations::asymmetric_graph<asymmetric_vertex, weight_type>, f
 
   auto tOffsets = sequence<uintT>::uninitialized(n + 1);
   parallel_for(0, n, [&](size_t i) { tOffsets[i] = INT_T_MAX; });
-  triple* temp = gbbs::new_array_no_init<triple>(m);
+  triple *temp = gbbs::new_array_no_init<triple>(m);
   parallel_for(0, n, [&](size_t i) {
     uintT o = v_data[i].offset;
     uintE deg = v_data[i].degree;
     for (uintT j = 0; j < deg; j++) {
-      auto& cur_edge = (edges + o)[j];
+      auto &cur_edge = (edges + o)[j];
       temp[o + j] =
           std::make_pair(std::get<0>(cur_edge),
                          std::make_pair((uintE)i, std::get<1>(cur_edge)));
@@ -306,10 +308,10 @@ Graph<graph_implementations::asymmetric_graph<asymmetric_vertex, weight_type>, f
 
   auto temp_seq = gbbs::make_slice(temp, m);
   parlay::integer_sort_inplace(temp_seq,
-                               [&](const triple& p) { return p.first; });
+                               [&](const triple &p) { return p.first; });
 
   tOffsets[temp[0].first] = 0;
-  id_and_weight* inEdges = gbbs::new_array_no_init<id_and_weight>(m);
+  id_and_weight *inEdges = gbbs::new_array_no_init<id_and_weight>(m);
   inEdges[0] = std::make_tuple(temp[0].second.first, temp[0].second.second);
 
   parallel_for(1, m, [&](size_t i) {
@@ -334,7 +336,7 @@ Graph<graph_implementations::asymmetric_graph<asymmetric_vertex, weight_type>, f
     v_in_data[i].degree = tOffsets[i + 1] - v_in_data[i].offset;
   });
 
-  return Graph<graph_implementations::asymmetric_graph<asymmetric_vertex, weight_type>, false>(
+  return G(
       v_data, v_in_data, n, m,
       [=]() {
         gbbs::free_array(v_data, n);

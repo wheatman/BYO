@@ -68,18 +68,26 @@ template <class T> struct vector_set {
   vector_set() = default;
   vector_set(auto start, auto end) : vec(start, end) {}
 
+  size_t get_memory_size() {
+    // the +8 is since the capacity is stored in the memory blob, but not counted in the space
+    return vec.capacity() * sizeof(T) + sizeof(*this)+8;
+  }
+
 private:
   gbbs::sequence<T> vec = {};
 };
 
 #include "../run_unweighted.h"
 
-using graph_impl = gbbs::graph_implementations::symmetric_set_graph<
-    gbbs::symmetric_vertex, gbbs::empty, vector_set<gbbs::uintE>>;
+using sym_graph_impl =
+    gbbs::graph_implementations::symmetric_set_graph<vector_set<gbbs::uintE>,
+                                                     gbbs::empty>;
+
+using asym_graph_impl =
+    gbbs::graph_implementations::asymmetric_set_graph<vector_set<gbbs::uintE>,
+                                                      gbbs::empty>;
 
 using graph_api = gbbs::full_api;
-
-using graph_t = gbbs::Graph<graph_impl, /* symmetric */ true, graph_api>;
 
 int main(int argc, char *argv[]) {
   gbbs::commandLine P(argc, argv, " [-s] <inFile>");
@@ -99,11 +107,19 @@ int main(int argc, char *argv[]) {
     return -1;
   } else {
     if (symmetric) {
+      using graph_t =
+          gbbs::Graph<sym_graph_impl, /* symmetric */ true, graph_api>;
       auto G = gbbs::gbbs_io::read_unweighted_symmetric_graph<graph_t>(
           iFile, mmap, binary);
-      run_all<true>(G, options);
+      auto bytes_used = G.get_memory_size();
+      std::cout << "total bytes used = " << bytes_used << "\n";
+      run_all(G, options);
     } else {
-      std::cerr << "does not support directed graphs yet\n";
+      using graph_t =
+          gbbs::Graph<asym_graph_impl, /* symmetric */ false, graph_api>;
+      auto G = gbbs::gbbs_io::read_unweighted_symmetric_graph<graph_t>(
+          iFile, mmap, binary);
+      run_all(G, options);
       return -1;
     }
   }

@@ -23,6 +23,7 @@
 
 #pragma once
 
+#include <cassert>
 #include <cstddef>
 #include <stdlib.h>
 #include <fstream>
@@ -31,6 +32,8 @@
 #include <optional>
 #include <string>
 #include <type_traits>
+
+#include <malloc.h>
 
 #include <vector>
 #include <functional>
@@ -61,7 +64,7 @@ namespace gbbs {
 //  The graph is represented as an array of edges of type
 //  vertex_type::edge_type.
 //  For uncompressed vertices, this type is equal to tuple<uintE, W>.
-template <template <class W> class vertex_type, class W, bool shuffle = false>
+template <template <class W> class vertex_type, class W>
 struct symmetric_graph {
   using vertex = vertex_type<W>;
   using weight_type = W;
@@ -209,24 +212,11 @@ struct symmetric_graph {
                   vertex_weight_type *_vertex_weights = nullptr)
       : v_data(v_data), e0(_e0), vertex_weights(_vertex_weights), n(n), m(m),
         deletion_fn(_deletion_fn) {
-    if constexpr (shuffle) {
-      auto degs = sequence<size_t>::from_function(
-          n, [&](size_t i) { return get_vertex(i).out_degree(); });
-      size_t sum_degs = parlay::scan_inplace(make_slice(degs));
-      assert(sum_degs == m);
-      parallel_for(
-          0, n,
-          [&](size_t i) {
-            size_t start = degs[i];
-            size_t end = sum_degs;
-            if (i < n - 1) {
-              end = degs[i + 1];
-            }
-            std::mt19937 g(i);
-            std::shuffle(e0 + start, e0 + end, g);
-          },
-          1);
-    }
+  }
+
+  size_t get_memory_size() {
+    // TODO(wheatman) only works for unweighted uncompressed graphs
+    return sizeof(vertex_data) * n + sizeof(edge_type) * m;
   }
 
   // Move constructor
@@ -584,6 +574,7 @@ struct asymmetric_graph {
     other.in_edges = nullptr;
     other.vertex_weights = nullptr;
     other.deletion_fn = []() {};
+    return *this;
   }
 
   // Copy constructor
@@ -864,6 +855,10 @@ template <class W, class set_type, bool inplace_ = false> struct set_wrapper {
   };
   static constexpr bool insertable = support_insert | native_insert_batch;
 
+  static constexpr bool supports_get_memory_size = requires(set_type & set) {
+    set.get_memory_size();
+  };
+
   static void print_api() {
     std::cout << "### SET API ###\n";
     std::cout << "binary = " << binary << "\n";
@@ -885,6 +880,16 @@ template <class W, class set_type, bool inplace_ = false> struct set_wrapper {
     } else {
       std::cout << "static structure cannot be updated\n";
     }
+    std::cout << "supports_get_memory_size = " << supports_get_memory_size << "\n";
+  }
+
+  size_t get_memory_size() {
+    static_assert(supports_get_memory_size);
+    size_t total_size = set.get_memory_size();
+    if constexpr (inplace) {
+      total_size += max_inplace_edge_count * sizeof(inplace_array_element_type);
+    }
+    return total_size;
   }
 
   size_t size() const {
@@ -914,17 +919,27 @@ template <class W, class set_type, bool inplace_ = false> struct set_wrapper {
   //   return std::copy(first2, last2, d_first);
   // }
 
-  void sorted_batch_insert_no_inplace(gbbs::uintE *es, size_t n) {
+  void sorted_batch_insert_no_inplace(const auto &start, const auto &end) {
     if constexpr (native_insert_batch) {
-      set.insert_sorted_batch(es, n);
+      set.insert_sorted_batch(start, end);
     } else if constexpr (support_insert) {
-      for (size_t i = 0; i < n; i++) {
-        set.insert(es[i]);
+      for (auto it = start; it != end; ++it) {
+        set.insert(*it);
       }
     }
   }
 
-   void insert_sorted_batch(gbbs::uintE *es, size_t n) {
+  void sorted_batch_remove_no_inplace(const auto &start, const auto &end) {
+    if constexpr (native_insert_batch) {
+      set.remove_sorted_batch(start, end);
+    } else if constexpr (support_insert) {
+      for (auto it = start; it != end; ++it) {
+        set.erase(*it);
+      }
+    }
+  }
+
+  void insert_sorted_batch(gbbs::uintE *es, size_t n) {
     // std::cout << "batch\n";
     // for (int i = 0; i < n; i++) {
     //   std::cout << es[i] << ", ";
@@ -944,17 +959,18 @@ template <class W, class set_type, bool inplace_ = false> struct set_wrapper {
       int new_inplace_count = 0;
       bool done_in_place = false;
 
-      while (inplace_it != inplace_end && es != batch_end && new_inplace_count < max_inplace_edge_count) {
+      while (inplace_it != inplace_end && es != batch_end &&
+             new_inplace_count < max_inplace_edge_count) {
         if (*inplace_it < *es) {
           new_inplace[new_inplace_count] = *inplace_it;
           inplace_it++;
           new_inplace_count++;
-          
+
         } else if (*es < *inplace_it) {
           new_inplace[new_inplace_count] = *es;
           es++;
           new_inplace_count++;
-          
+
         } else {
           // they are equal
           new_inplace[new_inplace_count] = *inplace_it;
@@ -967,14 +983,16 @@ template <class W, class set_type, bool inplace_ = false> struct set_wrapper {
       // there is still data in one of them that needs to fill the inplace
       if (new_inplace_count < max_inplace_edge_count) {
         if (inplace_it < inplace_end) {
-          while (new_inplace_count < max_inplace_edge_count && inplace_it < inplace_end) {
+          while (new_inplace_count < max_inplace_edge_count &&
+                 inplace_it < inplace_end) {
             new_inplace[new_inplace_count] = *inplace_it;
             new_inplace_count++;
             inplace_it++;
           }
           if (inplace_it != inplace_end) {
             // may still be some data in the old inplace
-            sorted_batch_insert_no_inplace(inplace_it, inplace_end - inplace_it);
+            sorted_batch_insert_no_inplace(
+                inplace_it, inplace_it + (inplace_end - inplace_it));
           }
           inplace_array = new_inplace;
           inplace_count = new_inplace_count;
@@ -987,7 +1005,7 @@ template <class W, class set_type, bool inplace_ = false> struct set_wrapper {
           }
           if (es != batch_end) {
             // may still be some data in the batch
-            sorted_batch_insert_no_inplace(es, batch_end - es);
+            sorted_batch_insert_no_inplace(es, es + (batch_end - es));
           }
           inplace_array = new_inplace;
           inplace_count = new_inplace_count;
@@ -997,9 +1015,10 @@ template <class W, class set_type, bool inplace_ = false> struct set_wrapper {
       // we are done with the inplace, there may be data in both
 
       if (inplace_it < inplace_end) {
-        //if something got kicked out of the inplace, there must be room for it at the front of the batch
+        // if something got kicked out of the inplace, there must be room for it
+        // at the front of the batch
         size_t num_kicked = inplace_end - inplace_it;
-        sorted_batch_insert_no_inplace(inplace_it, num_kicked);
+        sorted_batch_insert_no_inplace(inplace_it, inplace_it + num_kicked);
       }
       inplace_array = new_inplace;
       inplace_count = new_inplace_count;
@@ -1008,15 +1027,199 @@ template <class W, class set_type, bool inplace_ = false> struct set_wrapper {
         return;
       }
     }
-    sorted_batch_insert_no_inplace(es, n);
+    sorted_batch_insert_no_inplace(es, es + n);
   }
 
-  void sorted_batch_remove_no_inplace(gbbs::uintE *es, size_t n) {
-    if constexpr (native_insert_batch) {
-      set.remove_sorted_batch(es, n);
-    } else if constexpr (support_insert) {
-      for (size_t i = 0; i < n; i++) {
-        set.erase(es[i]);
+  template <bool sorted> void insert_range(auto range) {
+    if constexpr (!inplace) {
+      sorted_batch_insert_no_inplace(range.begin(), range.end());
+      return;
+    } else {
+      // this is checked at a higher level
+      assert(!range.empty());
+      if constexpr (sorted) {
+        // if the input is sorted we maintain that the inplace is the first few
+        // elements to stay sorted
+        auto es = range.begin();
+        auto batch_end = range.end();
+        std::array<inplace_array_element_type, max_inplace_edge_count>
+            new_inplace = {};
+        auto inplace_it = inplace_array.data();
+        auto inplace_end = inplace_array.data() + inplace_count;
+        int new_inplace_count = 0;
+        bool done_in_place = false;
+
+        while (inplace_it != inplace_end && es != batch_end &&
+               new_inplace_count < max_inplace_edge_count) {
+          if (*inplace_it < *es) {
+            new_inplace[new_inplace_count] = *inplace_it;
+            inplace_it++;
+            new_inplace_count++;
+
+          } else if (*es < *inplace_it) {
+            new_inplace[new_inplace_count] = *es;
+            es++;
+            new_inplace_count++;
+
+          } else {
+            // they are equal
+            new_inplace[new_inplace_count] = *inplace_it;
+            inplace_it++;
+            es++;
+            new_inplace_count++;
+          }
+        }
+
+        // there is still data in one of them that needs to fill the inplace
+        if (new_inplace_count < max_inplace_edge_count) {
+          if (inplace_it < inplace_end) {
+            while (new_inplace_count < max_inplace_edge_count &&
+                   inplace_it < inplace_end) {
+              new_inplace[new_inplace_count] = *inplace_it;
+              new_inplace_count++;
+              inplace_it++;
+            }
+            if (inplace_it != inplace_end) {
+              sorted_batch_insert_no_inplace(inplace_it, inplace_end);
+            }
+            inplace_array = new_inplace;
+            inplace_count = new_inplace_count;
+            return;
+          } else {
+            while (new_inplace_count < max_inplace_edge_count &&
+                   es < batch_end) {
+              new_inplace[new_inplace_count] = *es;
+              new_inplace_count++;
+              es++;
+            }
+            if (es != batch_end) {
+              sorted_batch_insert_no_inplace(es, batch_end);
+            }
+            inplace_array = new_inplace;
+            inplace_count = new_inplace_count;
+            return;
+          }
+        }
+        // we are done with the inplace, there may be data in both
+
+        if (inplace_it < inplace_end) {
+          // if something got kicked out of the inplace, there must be room for
+          // it at the front of the batch
+          sorted_batch_insert_no_inplace(inplace_it, inplace_end);
+
+        }
+        inplace_array = new_inplace;
+        inplace_count = new_inplace_count;
+        size_t n = batch_end - es;
+        if (n == 0) {
+          return;
+        }
+        sorted_batch_insert_no_inplace(es, batch_end);
+      } else {
+        // if the input is not sorted we don't maintain anything about which
+        // elements are stored in place
+        auto it = range.begin();
+        auto batch_end = range.end();
+        // first try and add elements to the inplace making sure they are not
+        // already in the inplace
+        while (inplace_count < max_inplace_edge_count && it < batch_end) {
+          // check if the next edge from the batch is already in the inplace
+          auto edge = *it;
+          bool new_edge = true;
+          for (size_t i = 0; i < inplace_count; i++) {
+            if (edge == inplace_array[i]) {
+              ++it;
+              new_edge = false;
+              break;
+            }
+          }
+          if (new_edge) {
+            inplace_array[inplace_count] = edge;
+            inplace_count += 1;
+            ++it;
+          }
+        }
+        // add the remaining edges to the set
+        sorted_batch_insert_no_inplace(it, batch_end);
+        // instead of checking for duplicates for each element, we just remove
+        // all elementes form the inplace from the main set at the end since for
+        // non trivial sized batches this should be much faster we are doing
+        // work propotional to size of inplace * O(remove) the unsorted cases is
+        // mostly hashmaps where O(remove) is O(1) instead of doing work
+        // proportional to size of batch
+        sorted_batch_remove_no_inplace(inplace_array.data(), inplace_array.data()+inplace_count);
+      }
+    }
+  }
+
+  template <bool sorted> void remove_range(auto range) {
+    if constexpr (!inplace) {
+      sorted_batch_remove_no_inplace(range.begin(), range.end());
+      return;
+    } else {
+      if constexpr (sorted) {
+        // for all elements in the inplace check if I want to remove them
+        size_t num_written = 0;
+        for (int i = 0; i < inplace_count; i++) {
+          auto it =
+              std::lower_bound(range.begin(), range.end(), inplace_array[i]);
+          if (it == range.end() || *it != inplace_array[i]) {
+            inplace_array[num_written] = inplace_array[i];
+            num_written++;
+          }
+        }
+        for (int i = num_written; i < inplace_count; i++) {
+          inplace_array[i] = {};
+        }
+        inplace_count = num_written;
+        sorted_batch_remove_no_inplace(range.begin(), range.end());
+        // now we need to refil the inplace with data from the set
+        // this is making an assumption that data structures that prefer sorted
+        // inputs also map over the elements in sorted order, which is probably
+        // resonable
+        if (inplace_count < max_inplace_edge_count) {
+          // this might be really slow if you don't support map with early exit
+          map_early_exit<true>([&](auto elem, [[maybe_unused]] weight_type w) {
+            if (inplace_count < max_inplace_edge_count) {
+              inplace_array[inplace_count] = elem;
+              inplace_count++;
+            }
+            return inplace_count == max_inplace_edge_count;
+          });
+          if (num_written < inplace_count) {
+            sorted_batch_remove_no_inplace(inplace_array.data() + num_written,
+                                           inplace_array.data() +
+                                               inplace_count);
+          }
+        }
+        return;
+      } else {
+        // unsorted case
+        for (auto el : range) {
+          for (int i = 0; i < inplace_count; i++) {
+            if (el == inplace_array[i]) {
+              inplace_array[i] = inplace_array[inplace_count - 1];
+              inplace_array[inplace_count - 1] = {};
+              inplace_count -= 1;
+            }
+          }
+          set.erase(el);
+        }
+        // now we need to refil the inplace with data from the set
+        if (inplace_count < max_inplace_edge_count) {
+          size_t num_written = inplace_count;
+          // this might be really slow if you don't support map with early exit
+          map_early_exit<true>([&](auto elem, [[maybe_unused]] weight_type w) {
+            if (inplace_count < max_inplace_edge_count) {
+              inplace_array[inplace_count] = elem;
+              inplace_count++;
+            }
+            return inplace_count == max_inplace_edge_count;
+          });
+          for (size_t i = num_written; i < inplace_count; i++) {
+            set.erase(inplace_array[i]);
+          }
+        }
       }
     }
   }
@@ -1028,7 +1231,7 @@ template <class W, class set_type, bool inplace_ = false> struct set_wrapper {
       auto batch_end = es+n;
       for (int i = 0; i < inplace_count; i++) {
         auto it = std::lower_bound(es, batch_end, inplace_array[i]);
-        if (it != batch_end && *it != inplace_array[i]) {
+        if (it == batch_end || *it != inplace_array[i]) {
           inplace_array[num_written] = inplace_array[i];
           num_written++;
         }
@@ -1192,7 +1395,8 @@ template <class W, class set_type, bool inplace_ = false> struct set_wrapper {
           if constexpr (binary) {
             return std::get<0>(elem);
           } else {
-            return elem;
+            // convert form tuple to pair
+            return std::make_pair(std::get<0>(elem), std::get<1>(elem));
           }
         });
     set_type set2(range.begin(), range.end());
@@ -1259,17 +1463,27 @@ private:
 //  with each edge
 //  2) W: the edge weight template
 //  3) set: the set implementation to use, will be wrapper in a set_wrapper
-template <template <class W> class vertex_type, class W, class set, bool inplace = false>
+template <class set, class W = gbbs::empty, bool inplace = false, bool prefer_sorted_inputs_ = true>
 struct symmetric_set_graph {
-  using vertex = vertex_type<W>;
   using weight_type = W;
   static constexpr bool binary = std::is_same_v<gbbs::empty, W>;
-  using edge_type = typename vertex::edge_type;
+  using edge_type = std::tuple<uintE, W>;
   using vertex_weight_type = double;
   using set_wrapper_type = set_wrapper<W, set, inplace>;
   static constexpr bool support_inserts = set_wrapper_type::insertable;
+  static constexpr bool supports_get_memory_size =
+      set_wrapper_type::supports_get_memory_size;
+  static constexpr bool insertable = set_wrapper_type::insertable;
+  static constexpr bool prefer_sorted_inputs = prefer_sorted_inputs_;
 
   size_t N() const { return nodes.size(); }
+
+  size_t get_memory_size() {
+    static_assert(supports_get_memory_size);
+    auto D = parlay::delayed_seq<size_t>(
+        N(), [&](size_t i) { return nodes[i].get_memory_size(); });
+    return parlay::reduce(D);
+  }
 
   uintE degree(size_t i) const {
     return nodes[i].size();
@@ -1319,6 +1533,62 @@ struct symmetric_set_graph {
       if (!els[i].second.empty()) {
         nodes[els[i].first].remove_sorted_batch(els[i].second.data(),
                                           els[i].second.size());
+      }
+    });
+  }
+
+  void insert_pervertex_range(std::tuple<gbbs::uintE, gbbs::uintE> *es,
+                              const auto &offsets) {
+    parlay::parallel_for(0, offsets.size() - 1, [&](size_t i) {
+      auto start = es + offsets[i];
+      auto end = es + offsets[i + 1];
+      if (start == end) {
+        return;
+      }
+      if constexpr (prefer_sorted_inputs) {
+        auto slice = parlay::slice(es + offsets[i], es + offsets[i + 1]);
+        auto sorted = parlay::integer_sort(
+            slice, [](auto el) { return std::get<1>(el); });
+        auto unique = parlay::unique(sorted);
+        start = unique.begin();
+        end = unique.end();
+        auto range =
+            std::views::transform(std::ranges::subrange(start, end),
+                                  [](auto elem) { return std::get<1>(elem); });
+        nodes[std::get<0>(es[offsets[i]])].template insert_range<true>(range);
+      } else {
+        auto range =
+            std::views::transform(std::ranges::subrange(start, end),
+                                  [](auto elem) { return std::get<1>(elem); });
+        nodes[std::get<0>(es[offsets[i]])].template insert_range<false>(range);
+      }
+    });
+  }
+
+  void remove_pervertex_range(std::tuple<gbbs::uintE, gbbs::uintE> *es,
+                              const auto &offsets) {
+    parlay::parallel_for(0, offsets.size() - 1, [&](size_t i) {
+      auto start = es + offsets[i];
+      auto end = es + offsets[i + 1];
+      if (start == end) {
+        return;
+      }
+      if constexpr (prefer_sorted_inputs) {
+        auto slice = parlay::slice(es + offsets[i], es + offsets[i + 1]);
+        auto sorted = parlay::integer_sort(
+            slice, [](auto el) { return std::get<1>(el); });
+        auto unique = parlay::unique(sorted);
+        start = unique.begin();
+        end = unique.end();
+        auto range =
+            std::views::transform(std::ranges::subrange(start, end),
+                                  [](auto elem) { return std::get<1>(elem); });
+        nodes[std::get<0>(es[offsets[i]])].template remove_range<true>(range);
+      } else {
+        auto range =
+            std::views::transform(std::ranges::subrange(start, end),
+                                  [](auto elem) { return std::get<1>(elem); });
+        nodes[std::get<0>(es[offsets[i]])].template remove_range<false>(range);
       }
     });
   }
@@ -1385,6 +1655,262 @@ struct symmetric_set_graph {
   std::function<void()> deletion_fn;
 
 };
+
+template <class set, class W = gbbs::empty, bool inplace = false, bool prefer_sorted_inputs_ = true>
+struct asymmetric_set_graph {
+  using weight_type = W;
+  static constexpr bool binary = std::is_same_v<gbbs::empty, W>;
+  using edge_type = std::tuple<uintE, W>;
+  using vertex_weight_type = double;
+  using set_wrapper_type = set_wrapper<W, set, inplace>;
+  static constexpr bool support_inserts = set_wrapper_type::insertable;
+  static constexpr bool insertable = set_wrapper_type::insertable;
+  static constexpr bool prefer_sorted_inputs = prefer_sorted_inputs_;
+
+  size_t N() const { return in_nodes.size(); }
+
+  uintE in_degree(size_t i) const {
+    return in_nodes[i].size();
+  }
+
+  uintE out_degree(size_t i) const {
+    return out_nodes[i].size();
+  }
+
+
+  template <class F>
+  void map_in_neighbors(size_t i, F f) const {
+    auto f2 = [f](auto a, auto b, auto... args){return f(b,a,args...);};
+    in_nodes[i].map([&](gbbs::uintE other, weight_type w) {
+      return f2(i, other, w);
+    });
+  }
+
+  template <class F>
+  void map_out_neighbors(size_t i, F f) const {
+    out_nodes[i].map([&](gbbs::uintE other, weight_type w) {
+      return f(i, other, w);
+    });
+  }
+
+  template <class F>
+  void map_in_neighbors_early_exit(size_t i, F f) const {
+    auto f2 = [f](auto a, auto b, auto... args){return f(b,a,args...);};
+    in_nodes[i].map_early_exit([&](gbbs::uintE other, weight_type w) {
+      return f2(i, other, w);
+    });
+  }
+
+  template <class F>
+  void map_out_neighbors_early_exit(size_t i, F f) const {
+    out_nodes[i].map_early_exit([&](gbbs::uintE other, weight_type w) {
+      return f(i, other, w);
+    });
+  }
+
+  template <class F>
+  void parallel_map_in_neighbors(size_t i, F f) const {
+    auto f2 = [f](auto a, auto b, auto... args){return f(b,a,args...);};
+    in_nodes[i].parallel_map([&](gbbs::uintE other, weight_type w) {
+      return f2(i, other, w);
+    });
+  }
+
+  template <class F>
+  void parallel_map_out_neighbors(size_t i, F f) const {
+    out_nodes[i].parallel_map([&](gbbs::uintE other, weight_type w) {
+      return f(i, other, w);
+    });
+  }
+
+  template <class F, typename Block_F = std::nullptr_t>
+  void parallel_map_in_neighbors_early_exit(size_t i, F f, Block_F block_check = {}) const {
+    auto f2 = [f](auto a, auto b, auto... args){return f(b,a,args...);};
+    in_nodes[i].parallel_map_early_exit([&](gbbs::uintE other, weight_type w) {
+      return f2(i, other, w);
+    }, block_check);
+  }
+
+  template <class F, typename Block_F = std::nullptr_t>
+  void parallel_map_out_neighbors_early_exit(size_t i, F f, Block_F block_check = {}) const {
+    out_nodes[i].parallel_map_early_exit([&](gbbs::uintE other, weight_type w) {
+      return f2(i, other, w);
+    }, block_check);
+  }
+
+
+  // void insert_sorted_grouped_batch(parlay::sequence<std::pair<gbbs::uintE, parlay::sequence<gbbs::uintE>>> & els) {
+  //   parlay::parallel_for(0, els.size(), [&](size_t i) {
+  //     if (!els[i].second.empty()) {
+  //       nodes[els[i].first].insert_sorted_batch(els[i].second.data(),
+  //                                         els[i].second.size());
+  //     }
+  //   });
+  // }
+
+  // void remove_sorted_grouped_batch(parlay::sequence<std::pair<gbbs::uintE, parlay::sequence<gbbs::uintE>>> & els) {
+  //   parlay::parallel_for(0, els.size(), [&](size_t i) {
+  //     if (!els[i].second.empty()) {
+  //       nodes[els[i].first].remove_sorted_batch(els[i].second.data(),
+  //                                         els[i].second.size());
+  //     }
+  //   });
+  // }
+
+  // void insert_pervertex_range(std::tuple<gbbs::uintE, gbbs::uintE> *es,
+  //                             const auto &offsets) {
+  //   parlay::parallel_for(0, offsets.size() - 1, [&](size_t i) {
+  //     auto start = es + offsets[i];
+  //     auto end = es + offsets[i + 1];
+  //     if (start == end) {
+  //       return;
+  //     }
+  //     if constexpr (prefer_sorted_inputs) {
+  //       auto slice = parlay::slice(es + offsets[i], es + offsets[i + 1]);
+  //       auto sorted = parlay::integer_sort(
+  //           slice, [](auto el) { return std::get<1>(el); });
+  //       auto unique = parlay::unique(sorted);
+  //       start = unique.begin();
+  //       end = unique.end();
+  //       auto range =
+  //           std::views::transform(std::ranges::subrange(start, end),
+  //                                 [](auto elem) { return std::get<1>(elem); });
+  //       nodes[std::get<0>(es[offsets[i]])].template insert_range<true>(range);
+  //     } else {
+  //       auto range =
+  //           std::views::transform(std::ranges::subrange(start, end),
+  //                                 [](auto elem) { return std::get<1>(elem); });
+  //       nodes[std::get<0>(es[offsets[i]])].template insert_range<false>(range);
+  //     }
+  //   });
+  // }
+
+  // void remove_pervertex_range(std::tuple<gbbs::uintE, gbbs::uintE> *es,
+  //                             const auto &offsets) {
+  //   parlay::parallel_for(0, offsets.size() - 1, [&](size_t i) {
+  //     auto start = es + offsets[i];
+  //     auto end = es + offsets[i + 1];
+  //     if (start == end) {
+  //       return;
+  //     }
+  //     if constexpr (prefer_sorted_inputs) {
+  //       auto slice = parlay::slice(es + offsets[i], es + offsets[i + 1]);
+  //       auto sorted = parlay::integer_sort(
+  //           slice, [](auto el) { return std::get<1>(el); });
+  //       auto unique = parlay::unique(sorted);
+  //       start = unique.begin();
+  //       end = unique.end();
+  //       auto range =
+  //           std::views::transform(std::ranges::subrange(start, end),
+  //                                 [](auto elem) { return std::get<1>(elem); });
+  //       nodes[std::get<0>(es[offsets[i]])].template remove_range<true>(range);
+  //     } else {
+  //       auto range =
+  //           std::views::transform(std::ranges::subrange(start, end),
+  //                                 [](auto elem) { return std::get<1>(elem); });
+  //       nodes[std::get<0>(es[offsets[i]])].template remove_range<false>(range);
+  //     }
+  //   });
+  // }
+
+  // ======================= Constructors and fields  ========================
+  asymmetric_set_graph()
+      :vertex_weights(nullptr) {}
+
+  // for now use the same constructor as the exsisting one for ease, but
+  // probably write a more general constuctor for everyone to use later
+  // TODO(wheatman) figure out what to do with _deletion_fn, probably should
+  // just use unique pointer
+  asymmetric_set_graph(vertex_data *v_data, size_t n, size_t m,
+                       std::function<void()> _deletion_fn, edge_type *_e0,
+                       vertex_weight_type *_vertex_weights = nullptr)
+      : in_nodes(n), out_nodes(n), vertex_weights(_vertex_weights),
+        deletion_fn(_deletion_fn) {
+    // TODO(wheatman) this is just for debugging help to check that the correct
+    // api is generated for different sets)
+    set_wrapper_type::print_api();
+    // set the out nodes directly
+    parallel_for(0, n, [&](size_t i) {
+      out_nodes[i] = set_wrapper_type(
+          &_e0[v_data[i].offset], &_e0[v_data[i].offset + v_data[i].degree]);
+      // std::cout << "out node " << i << "\n";
+      // for (size_t j = v_data[i].offset; j < v_data[i].offset +
+      // v_data[i].degree; j++) {
+      //   std::cout << "\t " << std::get<0>(_e0[j]) << "\n";
+      // }
+    });
+    // transpose to get the in edges
+    auto pairs = parlay::flatten(parlay::tabulate(n, [&](size_t i) {
+      return parlay::map(
+          parlay::slice(&_e0[v_data[i].offset],
+                        &_e0[v_data[i].offset + v_data[i].degree]),
+          [=](auto ngh) {
+            return std::pair(std::get<0>(ngh),
+                             std::make_tuple(i, std::get<1>(ngh)));
+          },
+          1000);
+    }));
+    auto transposed = parlay::group_by_index(pairs, n);
+
+    parallel_for(0, n, [&](size_t i) {
+      in_nodes[i] =
+          set_wrapper_type(transposed[i].begin(), transposed[i].end());
+      //       std::cout << "in node " << i << "\n";
+      // for (size_t j =0; j < transposed[i].size(); j++) {
+      //   std::cout << "\t " << std::get<0>(transposed[i][j]) << "\n";
+      // }
+    });
+  }
+
+  // Move constructor
+  asymmetric_set_graph(asymmetric_set_graph&& other) noexcept {
+    in_nodes = other.in_nodes;
+    out_nodes = other.out_nodes;
+    vertex_weights = other.vertex_weights;
+    other.vertex_weights = nullptr;
+    deletion_fn = std::move(other.deletion_fn);
+  }
+
+  // Move assignment
+  asymmetric_set_graph& operator=(asymmetric_set_graph&& other) noexcept {
+    in_nodes = other.in_nodes;
+    out_nodes = other.out_nodes;
+    vertex_weights = other.vertex_weights;
+    other.vertex_weights = nullptr;
+    deletion_fn = std::move(other.deletion_fn);
+  }
+
+  // Copy constructor
+  asymmetric_set_graph(const asymmetric_set_graph& other) {
+    debug(std::cout << "Copying symmetric graph." << std::endl;);
+    in_nodes = other.in_nodes;
+    out_nodes = other.out_nodes;
+    vertex_weights = nullptr;
+    if (other.vertex_weights != nullptr) {
+      vertex_weights = gbbs::new_array_no_init<vertex_weight_type>(in_nodes.size());
+      parallel_for(
+          0, in_nodes.size(), [&](size_t i) { vertex_weights[i] = other.vertex_weights[i]; });
+    }
+    deletion_fn = [&]() {
+      if (vertex_weights != nullptr) {
+        gbbs::free_array(vertex_weights, in_nodes.size());
+      }
+    };
+  }
+
+  ~asymmetric_set_graph() {
+      deletion_fn();
+   }
+
+  // Graph Data
+  std::vector<set_wrapper_type> in_nodes;
+  std::vector<set_wrapper_type> out_nodes;
+  vertex_weight_type* vertex_weights;
+  // called to delete the graph
+  std::function<void()> deletion_fn;
+
+};
+
 
 
 // Mutates (sorts) the underlying array A containing a black-box description of
@@ -1625,7 +2151,12 @@ using no_parallel_map = Graph_API_use<true, true, false, true, false, true, true
 using no_degree = Graph_API_use<false, true, true, true, true, true, true, false>;
 using no_M = Graph_API_use<true, false, true, true, true, true, true, false>;
 
-template <class Representation, bool symmetric, class API = full_api> class Graph {
+template <class Representation, bool symmetric_, class API = full_api>
+class Graph {
+public:
+  static constexpr bool symmetric = symmetric_;
+
+private:
   Representation g;
   using api = API;
 
@@ -1760,6 +2291,21 @@ template <class Representation, bool symmetric, class API = full_api> class Grap
     }
   }
 
+  static constexpr bool supports_get_memory_size_() {
+    constexpr bool get_memory_size_member = requires(Representation & g) {
+      Representation::supports_get_memory_size;
+    };
+
+    constexpr bool get_memory_size_function = requires(Representation & g) {
+      g.get_memory_size();
+    };
+    if constexpr (get_memory_size_member) {
+      return Representation::supports_get_memory_size;
+    } else {
+      return get_memory_size_function;
+    }
+  }
+  static constexpr bool supports_get_memory_size = supports_get_memory_size_();
 
   std::conditional<storing_m, size_t, gbbs::empty>::type stored_m;
   std::conditional<storing_degrees, parlay::sequence<uintE>, gbbs::empty>::type
@@ -1845,14 +2391,32 @@ public:
     g.remove_sorted_batch(es, n);
   };
 
+  static constexpr bool support_insert_unsorted_batch = requires(
+      Representation & g, std::tuple<gbbs::uintE, gbbs::uintE> *es, size_t n) {
+    g.insert_batch(es, n);
+    g.remove_batch(es, n);
+  };
+
 
   static constexpr bool support_insert_grouped_batch = requires(
       Representation & g, parlay::sequence<std::pair<gbbs::uintE, parlay::sequence<gbbs::uintE>>> & els) {
     g.insert_sorted_grouped_batch(els);
     g.remove_sorted_grouped_batch(els);
   };
+  static constexpr bool support_insert_pervertex_range =
+      requires(Representation & g, std::tuple<gbbs::uintE, gbbs::uintE> *es,
+               const parlay::sequence<size_t> &offsets) {
+    g.insert_pervertex_range(es, offsets);
+    g.remove_pervertex_range(es, offsets);
+  }
+  && requires(Representation &g, std::tuple<gbbs::uintE, gbbs::uintE> *es,
+              const parlay::sequence<uint32_t> &offsets) {
+    g.insert_pervertex_range(es, offsets);
+    g.remove_pervertex_range(es, offsets);
+  };
   static constexpr bool support_insert_batch =
-      (support_insert_sorted_batch || support_insert_grouped_batch) &&
+      (support_insert_unsorted_batch || support_insert_sorted_batch ||
+       support_insert_grouped_batch || support_insert_pervertex_range) &&
       set_wrapper_supports_inserts_();
   static constexpr bool needs_finalize = needs_finalize_();
   static void print_api() {
@@ -2208,7 +2772,7 @@ public:
     } else {
       typename Monoid::T value = reduce.identity;
       map_neighbors(
-          id, [&](auto &...args) { value = reduce.f(value, f(args...)); });
+          id, [&](auto &...args) { value = reduce(value, f(args...)); });
       return value;
     }
   }
@@ -2223,7 +2787,7 @@ public:
     } else {
       typename Monoid::T value = reduce.identity;
       map_in_neighbors(
-          id, [&](auto &...args) { value = reduce.f(value, f(args...)); });
+          id, [&](auto &...args) { value = reduce(value, f(args...)); });
       return value;
     }
   }
@@ -2238,7 +2802,7 @@ public:
     } else {
       typename Monoid::T value = reduce.identity;
       map_out_neighbors(
-          id, [&](auto &...args) { value = reduce.f(value, f(args...)); });
+          id, [&](auto &...args) { value = reduce(value, f(args...)); });
       return value;
     }
   }
@@ -2441,9 +3005,14 @@ sequence<std::tuple<uintE, uintE, weight_type>> edges() const {
       running_count += degree(i);
     }
     for (uint64_t i = 0; i < N(); i++) {
+      gbbs::sequence<uintE> dests;
       map_neighbors(i, [&](auto src, auto dest, auto val) {
-        std::cout << dest << "\n";
+        dests.push_back(dest);
       });
+      parlay::integer_sort_inplace(dests);
+      for (auto dest : dests) {
+        std::cout << dest << "\n";
+      }
     }
   }
   void write_adj(std::string fname) {
@@ -2462,9 +3031,14 @@ sequence<std::tuple<uintE, uintE, weight_type>> edges() const {
       running_count += degree(i);
     }
     for (uint64_t i = 0; i < N(); i++) {
+      gbbs::sequence<uintE> dests;
       map_neighbors(i, [&](auto src, auto dest, auto val) {
-        myfile << dest << "\n";
+        dests.push_back(dest);
       });
+      parlay::integer_sort_inplace(dests);
+      for (auto dest : dests) {
+        myfile << dest << "\n";
+      }
     }
     myfile.close();
   }
@@ -2477,6 +3051,14 @@ sequence<std::tuple<uintE, uintE, weight_type>> edges() const {
     g.remove_sorted_batch(es, n);
   }
 
+  void insert_unsorted_batch(std::tuple<gbbs::uintE, gbbs::uintE> *es, size_t n) {
+    g.insert_batch(es, n);
+  }
+
+  void remove_unsorted_batch(std::tuple<gbbs::uintE, gbbs::uintE> *es, size_t n) {
+    g.remove_batch(es, n);
+  }
+
   void insert_sorted_grouped_batch(parlay::sequence<std::pair<gbbs::uintE, parlay::sequence<gbbs::uintE>>> &els) {
     g.insert_sorted_grouped_batch(els);
 
@@ -2487,7 +3069,15 @@ sequence<std::tuple<uintE, uintE, weight_type>> edges() const {
   }
 
   void insert_batch(std::tuple<gbbs::uintE, gbbs::uintE> *es, size_t n) {
-    if constexpr (support_insert_grouped_batch) {
+    if constexpr (support_insert_pervertex_range) {
+      if (n < static_cast<size_t>((std::numeric_limits<uint32_t>::max)())) {
+        auto offsets = semisort::semisort_equal_inplace_small(parlay::slice(es, es+n),  [](auto elem) {return std::get<0>(elem);}, true);
+        g.insert_pervertex_range(es, offsets);
+      } else {
+        auto offsets = semisort::semisort_equal_inplace_big(parlay::slice(es, es+n),  [](auto elem) {return std::get<0>(elem);}, true);
+        g.insert_pervertex_range(es, offsets);
+      }
+    } else if constexpr (support_insert_grouped_batch) {
       auto groups = semisort::group_by(parlay::slice(es, es+n), 
         [](auto elem) {return std::get<0>(elem);}, 
         [](auto elem) {return std::get<1>(elem);});
@@ -2497,14 +3087,24 @@ sequence<std::tuple<uintE, uintE, weight_type>> edges() const {
         groups[i].second = seq;
       });
       insert_sorted_grouped_batch(groups);
-    } else {
+    } else if constexpr (support_insert_sorted_batch) {
       auto elements = parlay::unique(parlay::sort(parlay::slice(es, es+n)));
       insert_sorted_batch(elements.data(), elements.size());
-
+    } else {
+      static_assert(support_insert_unsorted_batch);
+      insert_unsorted_batch(es, n);
     }
   }
   void remove_batch(std::tuple<gbbs::uintE, gbbs::uintE> *es, size_t n) {
-    if constexpr (support_insert_grouped_batch) {
+    if constexpr (support_insert_pervertex_range) {
+      if (n < static_cast<size_t>((std::numeric_limits<uint32_t>::max)())) {
+        auto offsets = semisort::semisort_equal_inplace_small(parlay::slice(es, es+n),  [](auto elem) {return std::get<0>(elem);}, true);
+        g.remove_pervertex_range(es, offsets);
+      } else {
+        auto offsets = semisort::semisort_equal_inplace_big(parlay::slice(es, es+n),  [](auto elem) {return std::get<0>(elem);}, true);
+        g.remove_pervertex_range(es, offsets);
+      }
+    } else if constexpr (support_insert_grouped_batch) {
       auto groups = semisort::group_by(parlay::slice(es, es+n), 
         [](auto elem) {return std::get<0>(elem);}, 
         [](auto elem) {return std::get<1>(elem);});
@@ -2514,10 +3114,37 @@ sequence<std::tuple<uintE, uintE, weight_type>> edges() const {
         groups[i].second = seq;
       });
       remove_sorted_grouped_batch(groups);
-    } else {
+    } else if constexpr (support_insert_sorted_batch) {
       auto elements = parlay::unique(parlay::sort(parlay::slice(es, es+n)));
       remove_sorted_batch(elements.data(), elements.size());
+    } else {
+      static_assert(support_insert_unsorted_batch);
+      remove_unsorted_batch(es, n);
+    }
+  }
 
+  size_t get_memory_size() {
+    if constexpr (supports_get_memory_size) {
+      return g.get_memory_size();
+    } else {
+
+#if __GLIBC__ > 2 || (__GLIBC__ > 2 && __GLIBC_MINOR__ > 32)
+      std::cerr
+          << "making a guess of size by using total allocations and "
+             "subtracting out the data passed in, probably only close for "
+             "unweighted graphs, also only true when you don't mmap the "
+             "files, and when you don't read in binary files\n";
+      std::cerr << "in short this is very very brittle\n";
+      const auto malloc_info = mallinfo2();
+      const auto malloc_allocated_space = malloc_info.uordblks;
+      size_t input_data_size = 0;
+      input_data_size += N()*sizeof(vertex_data);
+      input_data_size += M()*sizeof(uintE);
+      return malloc_allocated_space - input_data_size;
+#else
+      std::cerr << "don't have recent enough glibc to make a good guess\n";
+      return 0;
+#endif
     }
   }
 };

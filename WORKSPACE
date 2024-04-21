@@ -62,11 +62,17 @@ local_repository(
 new_local_repository(
     name = "aspen",
     path = "external/aspen/code/",
-    build_file = "external/BUILD.aspen",
+    build_file = "BUILD.aspen",
 )
 local_repository(
     name = "cpma",
     path = "external/Packed-Memory-Array/include/",
+)
+
+new_local_repository(
+    name = "pcsr_orig",
+    path = "external/pcsr_orig/",
+    build_file = "BUILD.pcsr_orig",
 )
 
 http_archive(

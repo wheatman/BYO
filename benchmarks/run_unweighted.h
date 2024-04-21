@@ -10,7 +10,7 @@
 #include "Connectivity/LabelPropagation/Connectivity.h"
 #include "Connectivity/SimpleUnionAsync/Connectivity.h"
 #include "Connectivity/WorkEfficientSDB14/Connectivity.h"
-#include "DegeneracyOrder/GoodrichPszona11/DegeneracyOrder.h"
+// #include "DegeneracyOrder/GoodrichPszona11/DegeneracyOrder.h"
 #include "GraphColoring/Hasenplaugh14/GraphColoring.h"
 #include "KCore/JulienneDBS17/KCore.h"
 #include "LowDiameterDecomposition/MPX13/LowDiameterDecomposition.h"
@@ -20,6 +20,7 @@
 #include "PageRank/PageRank.h"
 #include "SSBetweenessCentrality/Brandes/SSBetweennessCentrality.h"
 #include "Spanner/MPXV15/Spanner.h"
+#include "TriangleCounting/ShunTangwongsan15/Triangle.h"
 
 namespace gbbs {
 
@@ -366,36 +367,36 @@ double WorkEfficientCC_runner(const Graph &G, size_t rounds, bool dump,
   return time_per_iter;
 }
 
-template <class Graph>
-double DegeneracyOrder_runner(const Graph &G, size_t rounds, bool dump,
-                              double eps) {
-  std::cout << "### Application: DegeneracyOrder" << std::endl;
-  std::cout << "### ------------------------------------" << std::endl;
+// template <class Graph>
+// double DegeneracyOrder_runner(const Graph &G, size_t rounds, bool dump,
+//                               double eps) {
+//   std::cout << "### Application: DegeneracyOrder" << std::endl;
+//   std::cout << "### ------------------------------------" << std::endl;
 
-  double total_time = 0.0;
-  for (size_t r = 0; r <= rounds; r++) {
-    timer t;
-    t.start();
-    auto order = goodrichpszona_degen::DegeneracyOrder(G, eps);
-    double tt = t.stop();
-    std::cout << "### Running Time: " << tt << std::endl;
-    if (r == 0) {
-      if (dump) {
-        std::ofstream myfile;
-        myfile.open("DegeneracyOrder.out");
-        for (size_t i = 0; i < order.size(); i++) {
-          myfile << order[i] << std::endl;
-        }
-        myfile.close();
-      }
-    } else {
-      total_time += tt;
-    }
-  }
-  auto time_per_iter = total_time / rounds;
-  std::cout << "# time per iter: " << time_per_iter << "\n";
-  return time_per_iter;
-}
+//   double total_time = 0.0;
+//   for (size_t r = 0; r <= rounds; r++) {
+//     timer t;
+//     t.start();
+//     auto order = goodrichpszona_degen::DegeneracyOrder(G, eps);
+//     double tt = t.stop();
+//     std::cout << "### Running Time: " << tt << std::endl;
+//     if (r == 0) {
+//       if (dump) {
+//         std::ofstream myfile;
+//         myfile.open("DegeneracyOrder.out");
+//         for (size_t i = 0; i < order.size(); i++) {
+//           myfile << order[i] << std::endl;
+//         }
+//         myfile.close();
+//       }
+//     } else {
+//       total_time += tt;
+//     }
+//   }
+//   auto time_per_iter = total_time / rounds;
+//   std::cout << "# time per iter: " << time_per_iter << "\n";
+//   return time_per_iter;
+// }
 
 template <class Graph>
 double Coloring_runner(const Graph &G, size_t rounds, bool dump, bool LF,
@@ -661,6 +662,30 @@ double Spanner_runner(const Graph &G, size_t rounds, bool dump, size_t k) {
   return time_per_iter;
 }
 
+template <class Graph>
+double TriangleCount_runner(const Graph &G, size_t rounds) {
+  std::cout << "### Application: Triangle_degree_ordering" << std::endl;
+  std::cout << "### ------------------------------------" << std::endl;
+
+  double total_time = 0.0;
+  auto f = [&](uintE u, uintE v, uintE w) {};
+
+  for (size_t r = 0; r <= rounds; r++) {
+    timer t;
+    t.start();
+    auto count = Triangle_degree_ordering(G, f);
+    double tt = t.stop();
+    std::cout << "### Running Time: " << tt << " count = " << count
+              << std::endl;
+    if (r > 0) {
+      total_time += tt;
+    }
+  }
+  auto time_per_iter = total_time / rounds;
+  std::cout << "# time per iter: " << time_per_iter << "\n";
+  return time_per_iter;
+}
+
 namespace batch_insert_helpers {
 // from numerical recipes
 inline uint64_t hash64(uint64_t u) {
@@ -780,32 +805,33 @@ void Batch_insert_runner(std::map<std::string, double> &time_map, Graph &G,
 
       parallel_for(0, updates.size(), [&](size_t i) { updates[i] = rmat(i); });
 
-
       {
         timer st;
         timer sort_timer;
         double batch_sort_time = 0;
-        if constexpr (Graph::support_insert_grouped_batch) {
-          sort_timer.start();
-          auto groups = semisort::group_by(updates.cut(0, updates.size()), 
-            [](auto elem) {return std::get<0>(elem);}, 
-            [](auto elem) {return std::get<1>(elem);});
-          parlay::parallel_for(0, groups.size(), [&](size_t i) {
-            parlay::integer_sort_inplace(groups[i].second);
-            auto seq = parlay::unique(groups[i].second);
-            groups[i].second = seq;
-          });
-          batch_sort_time = sort_timer.stop();
-          st.start();
-          G.insert_sorted_grouped_batch(groups);
-        } else { 
-          sort_timer.start();
-          auto elements = parlay::unique(parlay::sort(updates));
-          batch_sort_time = sort_timer.stop();
-          st.start();
-          G.insert_sorted_batch(elements.data(), elements.size());
-        }
-        
+        // if constexpr (Graph::support_insert_grouped_batch) {
+        //   sort_timer.start();
+        //   auto groups = semisort::group_by(updates.cut(0, updates.size()),
+        //     [](auto elem) {return std::get<0>(elem);},
+        //     [](auto elem) {return std::get<1>(elem);});
+        //   parlay::parallel_for(0, groups.size(), [&](size_t i) {
+        //     parlay::integer_sort_inplace(groups[i].second);
+        //     auto seq = parlay::unique(groups[i].second);
+        //     groups[i].second = seq;
+        //   });
+        //   batch_sort_time = sort_timer.stop();
+        //   st.start();
+        //   G.insert_sorted_grouped_batch(groups);
+        // } else {
+        //   sort_timer.start();
+        //   auto elements = parlay::unique(parlay::sort(updates));
+        //   batch_sort_time = sort_timer.stop();
+        //   st.start();
+        //   G.insert_sorted_batch(elements.data(), elements.size());
+        // }
+        st.start();
+        G.insert_batch(updates.data(), updates.size());
+
         double batch_time = st.stop();
 
         if (ts > 0) {
@@ -813,32 +839,37 @@ void Batch_insert_runner(std::map<std::string, double> &time_map, Graph &G,
           sort_time += batch_sort_time;
         } else {
           if (dump) {
-            G.write_adj(std::string("graph_after_batch_")+std::to_string(batch_size)+std::string(".adj"));
+            G.write_adj(std::string("graph_after_batch_") +
+                        std::to_string(batch_size) + std::string(".adj"));
           }
         }
         std::cout << "done inserts in " << batch_time << "\n";
         std::cout << "sorts took " << batch_sort_time << "\n";
       }
-      
+      std::random_device rd;
+      std::mt19937 gen{rd()};
+      std::ranges::shuffle(updates, gen);
 
       {
         timer st;
-        if constexpr (Graph::support_insert_grouped_batch) {
-          auto groups = semisort::group_by(updates.cut(0, updates.size()), 
-            [](auto elem) {return std::get<0>(elem);}, 
-            [](auto elem) {return std::get<1>(elem);});
-          parlay::parallel_for(0, groups.size(), [&](size_t i) {
-            parlay::integer_sort_inplace(groups[i].second);
-            auto seq = parlay::unique(groups[i].second);
-            groups[i].second = seq;
-          });
-          st.start();
-          G.remove_sorted_grouped_batch(groups);
-        } else { 
-          auto elements = parlay::unique(parlay::sort(updates));
-          st.start();
-          G.remove_sorted_batch(elements.data(), elements.size());
-        }
+        // if constexpr (Graph::support_insert_grouped_batch) {
+        //   auto groups = semisort::group_by(updates.cut(0, updates.size()),
+        //     [](auto elem) {return std::get<0>(elem);},
+        //     [](auto elem) {return std::get<1>(elem);});
+        //   parlay::parallel_for(0, groups.size(), [&](size_t i) {
+        //     parlay::integer_sort_inplace(groups[i].second);
+        //     auto seq = parlay::unique(groups[i].second);
+        //     groups[i].second = seq;
+        //   });
+        //   st.start();
+        //   G.remove_sorted_grouped_batch(groups);
+        // } else {
+        //   auto elements = parlay::unique(parlay::sort(updates));
+        //   st.start();
+        //   G.remove_sorted_batch(elements.data(), elements.size());
+        // }
+        st.start();
+        G.remove_batch(updates.data(), updates.size());
         double batch_time = st.stop();
 
         if (ts > 0) {
@@ -846,7 +877,6 @@ void Batch_insert_runner(std::map<std::string, double> &time_map, Graph &G,
         }
         std::cout << "done deletes in " << batch_time << "\n";
       }
-      
     }
 
     std::string insert_key =
@@ -893,12 +923,13 @@ public:
   bool ssbetween_fa = false;
   bool ssbetween_ligra = false;
   size_t spanner_k = 4;
-  size_t max_batch = 100000000UL;
+  size_t max_batch = 1000000UL;
   bool inserts = false;
 };
 
-template <bool symmetric, class Graph>
+template <class Graph>
 void run_all(const Graph &G, const run_all_options &options) {
+  static constexpr bool symmetric = Graph::symmetric;
   std::cout << "### Threads: " << num_workers() << std::endl;
   std::cout << "### n: " << G.N() << std::endl;
   std::cout << "### m: " << G.M() << std::endl;
@@ -907,7 +938,7 @@ void run_all(const Graph &G, const run_all_options &options) {
   }
   std::map<std::string, double> time_map;
   if (!options.inserts) {
-    
+
     if constexpr (symmetric) {
       time_map["Map"] = Map_runner(G, options.rounds);
       time_map["Map_withRemote_0"] =
@@ -927,6 +958,7 @@ void run_all(const Graph &G, const run_all_options &options) {
       time_map["Map_withRemote_64"] =
           Map_Remote_runner<Graph, 64>(G, options.rounds);
     }
+    time_map["BFS"] = BFS_runner(G, options.src, options.rounds, options.dump);
     if constexpr (symmetric) {
       time_map["WorkEfficientDensestSubgraph"] =
           WorkEfficientDensestSubgraph_runner(G, options.DensestSubgraph_eps,
@@ -934,7 +966,6 @@ void run_all(const Graph &G, const run_all_options &options) {
       // time_map["CharikarAppxDensestSubgraph"] =
       //     CharikarAppxDensestSubgraph_runner(G, options.rounds);
     }
-    time_map["BFS"] = BFS_runner(G, options.src, options.rounds, options.dump);
     // time_map["CoSimRank"] = CoSimRank_runner(
     //     G, options.CoSimRank_eps, options.CoSimRank_iters, options.c,
     //     options.u, options.v, options.em, options.rounds);
@@ -954,18 +985,19 @@ void run_all(const Graph &G, const run_all_options &options) {
     //   // time_map["DegeneracyOrder"] = DegeneracyOrder_runner(
     //   //     G, options.rounds, options.dump, options.degen_eps);
     // }
-    time_map["Coloring"] = Coloring_runner(G, options.rounds, options.dump,
-                                          options.coloringLF, options.verify);
 
     if constexpr (symmetric) {
+
+      time_map["Coloring"] = Coloring_runner(
+          G, options.rounds, options.dump, options.coloringLF, options.verify);
       time_map["KCore"] =
           KCore_runner(G, options.rounds, options.dump, options.k_core_fa,
-                      options.k_core_num_buckets);
+                       options.k_core_num_buckets);
       time_map["LDD"] = LDD_runner(G, options.rounds, options.dump,
-                                  options.ldd_beta, options.ldd_permute);
+                                   options.ldd_beta, options.ldd_permute);
 
       time_map["MIS"] = MIS_runner(G, options.rounds, options.dump,
-                                  options.mis_spec_for, options.verify);
+                                   options.mis_spec_for, options.verify);
     }
 
     time_map["PageRank"] =
@@ -981,7 +1013,11 @@ void run_all(const Graph &G, const run_all_options &options) {
       time_map["Spanner"] =
           Spanner_runner(G, options.rounds, options.dump, options.spanner_k);
     }
+    if (G.M() < 1000000000) {
+      time_map["TriangleCount"] = TriangleCount_runner(G, options.rounds);
+    }
   }
+
   if (options.inserts) {
     // MODIFIES THE GRAPH
     // run last so we run everything else on the same graph
