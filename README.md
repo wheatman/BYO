@@ -3,11 +3,71 @@
 Organization
 --------
 
-This repository contains code for our paper "BYO: A Unified Framework for Benchmarking Large-Scale Graph Containers" (VLDB'24 in submission).
+This repository contains code for our paper "[BYO: A Unified Framework for Benchmarking Large-Scale Graph Containers](https://arxiv.org/abs/2405.11671)" (VLDB'24).
 
 It is designed to make it as easy as possible to implement and benchmark new graph container data structures.
 
-The containers already implemented can be found in benchmarks/run_structures
+The containers already implemented can be found in benchmarks/run_structures and include:
+
+The following set based structures:
+- vector of absl::btree [code](https://github.com/abseil/abseil-cpp/tree/master)
+  - run_absl_btree_set
+  - run_absl_btree_set_inplace
+- vector of absl::flat_hash_map [code](https://github.com/abseil/abseil-cpp/tree/master)
+  - run_absl_flat_hash_set
+  - run_absl_flat_hash_set_inplace
+- vector of std::set
+  - run_std_set
+  - run_std_set_inplace
+- vector of std::unordered_set
+  - run_std_unordered_set
+  - run_std_unordered_set
+- vector of aspen trees [code](https://github.com/DapperX/aspen/) [paper](https://dl.acm.org/doi/10.1145/3314221.3314598)
+  - run_vector_aspen
+  - run_vector_compressed_aspen (as described in the paper)
+  - run_vector_aspen_inplace
+  - run_vector_compressed_aspen_inplace
+- vector of cpam trees [code](https://github.com/ParAlg/CPAM) [paper](https://dl.acm.org/doi/abs/10.1145/3519939.3523733)
+  - run_vector_cpam
+  - run_vector_compressed_cpam (as described in the paper)
+  - run_vector_cpam_inplace
+  - run_vector_compressed_cpam_inplace
+- vector of PMAs [code](https://github.com/wheatman/Packed-Memory-Array/)
+  - run_vector_pma
+  - run_vector_spma
+  - run_vector_cpma
+  - run_vector_scpma
+- vector of tinysets [code](https://github.com/wheatman/SSTGraph/tree/main) [paper](https://ieeexplore.ieee.org/abstract/document/9671836)
+  - run_vector_tinyset
+- vector of vectors
+  - run_vector_vector
+
+
+The following full graph based structures:
+- csr
+  - run_csr
+  - run_csr_shuffled
+- gbbs [paper](https://dl.acm.org/doi/10.1145/3434393)
+  - run_gbbs (as described in the paper)
+- dhb [code](https://github.com/wheatman/dhb/tree/main) [paper](https://drops.dagstuhl.de/entities/document/10.4230/LIPIcs.SEA.2022.11)
+  - run_dhb (as described in the paper)
+- pcsr original [code](https://github.com/wheatman/Packed-Compressed-Sparse-Row) [paper](https://ieeexplore.ieee.org/abstract/document/8547566)
+  - run_pcsr_orig (can only run small graphs)
+- pcsr [code](https://github.com/wheatman/Packed-Memory-Array/)
+  - run_pcsr (as described in the paper)
+- ppcsr [code](https://github.com/PASSIONLab/terrace) [paper](https://epubs.siam.org/doi/abs/10.1137/1.9781611976472.3)
+  - run_ppcsr (as described in the paper)
+- F-Graph [code](https://github.com/wheatman/Packed-Memory-Array/) [paper](https://dl.acm.org/doi/abs/10.1145/3627535.3638492)
+  - run_single_pma
+  - run_single_spma
+  - run_single_cpma 
+  - run_single_scpma (as described in the paper)
+- SSTGraph [code](https://github.com/wheatman/SSTGraph) [paper](https://ieeexplore.ieee.org/abstract/document/9671836)
+  - run_sstgraph (as described in the paper)
+- Terrace [code](https://github.com/PASSIONLab/terrace) [paper](https://dl.acm.org/doi/abs/10.1145/3448016.3457313)
+  - run_terrace (as described in the paper)
+
+For many of the data structures we implement multiple different versions, we note above which version was described and benchmarked in the papers.
 
 The raw data for all systems we tested can be found at [here](https://docs.google.com/spreadsheets/d/1Vi3bbCeWBCgl-Me15aAYCf0wPGSVTteuVJFeKkLjcW8/edit?usp=sharing)
 
