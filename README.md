@@ -31,7 +31,7 @@ To compile codes for graphs with more than 2^32 edges, the `LONG` command-line
 parameter should be set. If the graph has more than 2^32 vertices, the
 `EDGELONG` command-line parameter should be set. Note that the codes have not
 been tested with more than 2^32 vertices, so if any issues arise please contact
-[Laxman Dhulipala](mailto:ldhulipa@cs.cmu.edu).
+make an issue on github.
 
 To compile with the OpenCilk scheduler instead of the Homegrown scheduler, use
 the Bazel configuration `--config=cilk`. To compile using OpenMP instead, use
@@ -43,20 +43,19 @@ To build:
 # Load external libraries as submodules. (This only needs to be run once.)
 git submodule update --init
 
-Note that the default compilation mode in bazel is to build optimized binaries
-(stripped of debug symbols). You can compile debug binaries by supplying `-c
-dbg` to the bazel build command.
+# Note that the default compilation mode in bazel is to build optimized binaries
+# (stripped of debug symbols). You can compile debug binaries by supplying `-c
+# dbg` to the bazel build command.
 
 #To build all of the different structures use the command 
 `bazel build benchmarks/run_structures:all`
 
 #similarly individual systems can be built with 
 
-`bazel build benchmarks/run_structures:run_csr
+bazel build benchmarks/run_structures:run_csr
 
-The following commands cleans the directory:
-```sh
-# For Bazel:
+# The following commands cleans the directory:
+
 $ bazel clean  # removes all executables
 
 ```
@@ -68,7 +67,7 @@ To add a new set container we recommend following the example given in run_vecto
 
 Similarly to add a new Graph container we recommend following the example in run_single_pma.
 
-You will also need to add the new container to the build file so that it can be built.
+You will also need to add the new container to the build file in `benchmarks/run_structures/BUILD` so that it can be built.
 
 
 
@@ -80,9 +79,7 @@ called with the "-s" flag for better performance. For example:
 
 ```sh
 # For Bazel:
-$ bazel run //benchmarks/BFS/NonDeterministicBFS:BFS_main -- -s -src 10 ~/gbbs/inputs/rMatGraph_J_5_100
-$ bazel run //benchmarks/IntegralWeightSSSP/JulienneDBS17:wBFS_main -- -s -w -src 15 ~/gbbs/inputs/rMatGraph_WJ_5_100
-
+$ ./bazel-bin/benchmarks/run_structures/run_csr -s -src 10 ~/gbbs/inputs/rMatGraph_J_5_100
 ```
 
 Note that the codes that compute single-source shortest paths (or centrality)
@@ -94,7 +91,7 @@ On NUMA machines, adding the command "numactl -i all " when running
 the program may improve performance for large graphs. For example:
 
 ```sh
-$ numactl -i all bazel run [...]
+$ numactl -i all ./bazel-bin/benchmarks/run_structures/run_csr [...]
 ```
 
 Running code on compressed graphs
