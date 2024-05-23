@@ -26,14 +26,14 @@
   branch = for_gbbs
 [submodule "external/aspen"]
 	path = external/aspen
-	url = git@github.com:DapperX/aspen.git
+	url = https://github.com/DapperX/aspen.git
 	branch = gbbs-plus
 [submodule "external/Packed-Memory-Array"]
 	path = external/Packed-Memory-Array
-	url = git@github.com:wheatman/Packed-Memory-Array.git
+	url = https://github.com/wheatman/Packed-Memory-Array.git
 [submodule "external/CPAM"]
 	path = external/CPAM
-	url = git@github.com:ParAlg/CPAM.git
+	url = https://github.com/ParAlg/CPAM.git
 [submodule "external/pcsr_orig"]
 	path = external/pcsr_orig
-	url = git@github.com:wheatman/Packed-Compressed-Sparse-Row.git
+	url = https://github.com/wheatman/Packed-Compressed-Sparse-Row.git
