@@ -152,6 +152,14 @@ struct symmetric_PCSR_graph {
   //   };
   // }
 
+  size_t get_memory_size() {
+    size_t total_size = 0;
+    total_size += nodes.nodes.capacity() * sizeof(node_t);
+    total_size += nodes.edges.N * sizeof(edge_t);
+    total_size += sizeof(PCSR);
+    return total_size;
+  }
+
   ~symmetric_PCSR_graph() { deletion_fn(); }
 
   // Graph Data
@@ -190,6 +198,8 @@ int main(int argc, char *argv[]) {
     if (symmetric) {
       auto G = gbbs::gbbs_io::read_unweighted_symmetric_graph<graph_t>(
           iFile, mmap, binary);
+      auto bytes_used = G.get_memory_size();
+      std::cout << "total bytes used = " << bytes_used << "\n";
       run_all(G, options);
     } else {
       std::cerr << "does not support directed graphs yet\n";
