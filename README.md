@@ -271,3 +271,8 @@ bazel run //utils:snap_converter -- -s -i ${PWD}/wiki-Vote.txt -o <output file>
 #   make snap_converter
 #   ./snap_converter -s -i <input file> -o <output file>
 ```
+
+## Citation
+Please cite as 
+
+Brian Wheatman, Xiaojun Dong, Zheqi Shen, Laxman Dhulipala, Jakub Łącki, Prashant Pandey, and Helen Xu. 2024. BYO: A Unified Framework for Benchmarking Large-Scale Graph Containers. Proc. VLDB Endow. 17, 9 (May 2024), 2307–2320. https://doi.org/10.14778/3665844.3665859
