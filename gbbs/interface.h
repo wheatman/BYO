@@ -88,7 +88,7 @@ filterGraph(Graph &G, P &pred) {
   auto newVData = std::get<2>(ret);
   auto newEdges = std::get<3>(ret);
 
-  assert(newN == G.num_vertices());
+  assert(newN == G.N());
   return graph_implementations::symmetric_graph<symmetric_vertex, gbbs::empty>(
       newVData, newN, newM,
       [=]() {
