@@ -18,8 +18,10 @@
 template <class F> class Reducer {
 
 #ifdef __cpp_lib_hardware_interference_size
-  using std::hardware_constructive_interference_size;
-  using std::hardware_destructive_interference_size;
+  static constexpr std::size_t hardware_constructive_interference_size =
+      std::hardware_constructive_interference_size;
+  static constexpr std::size_t hardware_destructive_interference_size =
+      std::hardware_destructive_interference_size;
 #else
   // 64 bytes on x86-64 │ L1_CACHE_BYTES │ L1_CACHE_SHIFT │ __cacheline_aligned
   // │
@@ -61,8 +63,10 @@ public:
 template <class Monoid> class Reducer_with_object {
 
 #ifdef __cpp_lib_hardware_interference_size
-  using std::hardware_constructive_interference_size;
-  using std::hardware_destructive_interference_size;
+  static constexpr std::size_t hardware_constructive_interference_size =
+      std::hardware_constructive_interference_size;
+  static constexpr std::size_t hardware_destructive_interference_size =
+      std::hardware_destructive_interference_size;
 #else
   // 64 bytes on x86-64 │ L1_CACHE_BYTES │ L1_CACHE_SHIFT │ __cacheline_aligned
   // │
@@ -163,8 +167,10 @@ public:
 template <class T> class Reducer_Vector {
 
 #ifdef __cpp_lib_hardware_interference_size
-  using std::hardware_constructive_interference_size;
-  using std::hardware_destructive_interference_size;
+  static constexpr std::size_t hardware_constructive_interference_size =
+      std::hardware_constructive_interference_size;
+  static constexpr std::size_t hardware_destructive_interference_size =
+      std::hardware_destructive_interference_size;
 #else
   // 64 bytes on x86-64 │ L1_CACHE_BYTES │ L1_CACHE_SHIFT │ __cacheline_aligned
   // │
