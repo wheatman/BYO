@@ -75,6 +75,13 @@ new_local_repository(
     build_file = "BUILD.pcsr_orig",
 )
 
+new_git_repository(
+    name = "velographx",
+    build_file = "//:BUILD.velographx",
+    commit = "49a4e67d8274e8d58c44a7ea8d02523d0a4cbce9",
+    remote = "https://github.com/sauravsingla/VeloGraphX.git",
+)
+
 http_archive(
     name = "googletest",
     sha256 = "b4870bf121ff7795ba20d20bcdd8627b8e088f2d1dab299a031c1034eddc93d5",
