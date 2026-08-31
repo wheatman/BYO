@@ -1,0 +1,6 @@
+cc_library(
+    name = "dynamic_graph",
+    hdrs = glob(["include/velographx/**/*.hpp"]),
+    includes = ["include"],
+    visibility = ["//visibility:public"],
+)
