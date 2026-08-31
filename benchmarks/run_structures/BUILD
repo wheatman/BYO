@@ -320,6 +320,16 @@ cc_binary(
     defines = ["ASPEN_USE_COMPRESSION", "USE_INPLACE"],
 )
 
+cc_binary(
+    name = "run_velographx",
+    srcs = ["run_velographx.cc"],
+    deps = [
+        "//benchmarks:run_unweighted",
+        "//gbbs:bridge",
+        "@velographx//:dynamic_graph",
+    ],
+)
+
 package(
     default_visibility = ["//visibility:public"],
 )
